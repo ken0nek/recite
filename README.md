@@ -44,7 +44,11 @@ string is exact. The suffix path recovers it from history and **emits no
 
 ## Install
 
-Two channels. **Each is a complete install. You do not need both.**
+Three channels. **Each is a complete install. You need only one.**
+
+```sh
+brew install ken0nek/tap/recite
+```
 
 ```fish
 fisher install ken0nek/recite
@@ -55,8 +59,6 @@ Or clone and run the installer:
 ```sh
 git clone https://github.com/ken0nek/recite.git && ./recite/install.sh
 ```
-
-A Homebrew tap is planned.
 
 `install.sh` symlinks `recite-core` and `recite-clip` into `~/.local/bin` and the
 fish functions into `~/.config/fish/functions`. It is idempotent, and it replaces
@@ -85,7 +87,7 @@ recite            fish function   resolves the command string, tees, delegates
 
 **Do not install two channels.** Both write into `~/.config/fish/functions`, and
 `install.sh` prints `CONFLICT` rather than overwrite what it does not own — the
-loud case. The quiet one arrives with the tap. That directory precedes Homebrew's
+loud case. The quiet one is the tap. That directory precedes Homebrew's
 on `$fish_function_path`, so a fisher copy shadows a Homebrew one. `brew upgrade`
 then has no visible effect, and nothing warns you.
 `recite --version` names the function file that is actually live.
