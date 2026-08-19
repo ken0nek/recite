@@ -1,0 +1,5 @@
+```console
+$ git push https://x-access-token:[REDACTED]@github.com/o/r feature/task-1234-fix
+branch feature/task-1234-fix is up to date
+remote rejected [REDACTED]
+```

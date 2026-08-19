@@ -1,0 +1,3 @@
+plain https://github.com/o/r.git
+bare https://alice@github.com/o/r.git
+not a url a:b@c

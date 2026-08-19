@@ -1,0 +1,9 @@
+STRIPE_SECRET_KEY=sk_live_51AbCdEfGhIjKlMnOp
+restricted rk_test_00EXAMPLEEXAMPLE00
+GOOGLE_API_KEY=AIzaSyD-1234567890abcdefghijklmnopqrstu
+glpat-ABCdefGHIjklMNOpqrs expired
+//registry.npmjs.org/:_authToken=npm_ABCdefGHIjklMNOpqrstuvwxyz0123456789
+curl -X POST https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXX
+publishable pk_live_51AbCdEfGhIjKlMnOp
+feature/task-1234-fix
+disk-usage report

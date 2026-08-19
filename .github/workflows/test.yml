@@ -1,0 +1,57 @@
+name: test
+
+# Unfiltered `push` rather than `branches: [main]`: this is a solo repo with no
+# fork PRs to catch, so a push is the only event, and a branch pushed for a
+# pre-merge check must get signal too.
+on:
+  push:
+  workflow_dispatch:
+
+# Both jobs run repo-controlled shell on every push and neither writes anything
+# back, so the token gets nothing beyond read.
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: macOS — full suite
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install fish
+        run: brew install fish
+
+      # The next two steps are traps, not ceremony.
+      #
+      # install.sh exits 1 when ~/.local/bin is off PATH, and $GITHUB_PATH only
+      # affects LATER steps — so this has to precede the install, not follow it.
+      - name: Put ~/.local/bin on PATH
+        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # And the fish suite does not SKIP when the functions are not linked. It
+      # calls __recite_strip_suffix by name and relies on fish to autoload it, so
+      # without this every one of those assertions fails with `Unknown command`.
+      - name: Install
+        run: ./install.sh
+
+      - name: Test
+        run: test/all.sh
+
+  linux:
+    name: Linux — goldens only (informational)
+    runs-on: ubuntu-latest
+    # Informational on purpose: cross-platform byte-identity is a later
+    # milestone's gate, not an M0 obligation, so it must never gate the build.
+    # This is that gate early and for free — the goldens are byte-compared with
+    # `cmp`, so a Linux awk that diverges from macOS BWK shows up immediately.
+    #
+    # To make it the real gate, drop continue-on-error and matrix over BWK /
+    # gawk / mawk. It runs under whatever /usr/bin/awk the runner ships (mawk),
+    # which is one variant, not three.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Goldens
+        run: test/run.sh

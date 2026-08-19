@@ -1,0 +1,11 @@
+```console
+STRIPE_SECRET_KEY=[REDACTED]
+restricted [REDACTED]
+GOOGLE_API_KEY=[REDACTED]
+[REDACTED] expired
+//registry.npmjs.org/:_authToken=[REDACTED]
+curl -X POST https://[REDACTED]
+publishable pk_live_51AbCdEfGhIjKlMnOp
+feature/task-1234-fix
+disk-usage report
+```

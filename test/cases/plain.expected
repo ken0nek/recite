@@ -1,0 +1,6 @@
+```console
+$ brew list --installed-on-request
+asc
+bat
+eza
+```

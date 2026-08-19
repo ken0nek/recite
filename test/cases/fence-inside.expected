@@ -1,0 +1,8 @@
+````console
+$ cat notes.md
+notes:
+```sh
+echo hi
+```
+done
+````

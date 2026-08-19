@@ -1,0 +1,2 @@
+--as
+brew list --installed-on-request

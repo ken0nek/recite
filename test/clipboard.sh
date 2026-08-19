@@ -1,0 +1,38 @@
+#!/bin/sh
+# Integration test for recite-clip. Real clipboard, no mocks.
+#
+# This CLOBBERS the clipboard. Text is saved and restored; non-text contents (an
+# image, a file promise) cannot be, and are lost. Kept out of run.sh for that
+# reason — the golden suite stays pure.
+set -u
+
+dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+clip=${RECITE_CLIP:-"$dir/../functions/recite-clip"}
+
+if [ ! -x "$clip" ]; then
+  printf 'recite-clip not executable at %s\n' "$clip" >&2
+  exit 2
+fi
+
+saved=$(pbpaste 2>/dev/null) || saved=
+payload='recite-clip round-trip 12345'
+
+printf '%s' "$payload" | "$clip"
+rc=$?
+
+got=$(pbpaste 2>/dev/null) || got=
+
+# Restore before asserting, so a failure still leaves the clipboard as found.
+printf '%s' "$saved" | pbcopy 2>/dev/null || true
+
+if [ "$rc" -ne 0 ]; then
+  printf 'FAIL recite-clip exited %s\n' "$rc"
+  exit 1
+fi
+
+if [ "$got" = "$payload" ]; then
+  printf 'ok   clipboard round-trip\n'
+else
+  printf 'FAIL clipboard round-trip\n  want: %s\n  got:  %s\n' "$payload" "$got"
+  exit 1
+fi

@@ -1,0 +1,4 @@
+```console
+git remote: https://alice:[REDACTED]@github.com/o/r.git
+DATABASE_URL=postgres://admin:[REDACTED]@db.internal:5432/prod
+```

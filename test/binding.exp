@@ -1,0 +1,248 @@
+# Drives `bind alt-enter __recite_submit` on a real pty. Run through binding.sh,
+# which is where the opt-in gate and the reasoning for it live.
+#
+# Two traps, either of which makes this file report ok against the broken code
+# it exists to catch:
+#
+# - Setup sourced from a generated rc, never typed at the prompt. A typed
+#   `abbr -a zzq 'echo ABBR_EXPANDED'` leaves case A's own needle in the
+#   transcript, and the case then passes without anything expanding.
+# - Case B asserts on a file, not on the transcript. Under TERM=dumb fish paints
+#   the line only when it executes one, so a buffer that was wrapped and then
+#   refused never reaches the transcript at all — "the output never contains
+#   `| recite --as`" is true of the bug and of the fix alike. alt-z dumps the
+#   real buffer instead.
+#
+# Sends are deliberately slow. Faster than fish's reader and it drops characters,
+# which fails as a bug in the code rather than in the test.
+#
+# Every case ends with `expect eof`, a kill and a reap, because this file has to
+# be runnable against the bug it catches. Broken code can leave an unparseable
+# line in the buffer; `exit` then appends to that line instead of running, and a
+# bare `wait` blocks forever on a shell that never exits. `expect eof` returns on
+# its own timeout, so the kill is the thing that bounds the case. Without it,
+# reintroducing a bug HANGS this suite instead of failing it, and a gate that
+# hangs is worse than no gate: CI stalls rather than going red. `close` is the
+# tidier-looking way to drop the pty and is wrong — it acts on the current spawn
+# id, which after an eof can be the script's own stdout.
+#
+# ctrl-C clears a dirty buffer before `exit`, but belongs only in a case that
+# asserts on a file the stub wrote: the INTR character FLUSHES the pty queues,
+# discarding every byte expect has not read yet — and expect reads only during an
+# `expect`, so that is all of them. Sent from case A for symmetry, it takes that
+# case's whole transcript with it, and the case fails as though the binding had
+# never fired.
+
+set timeout 20
+log_user 0
+
+set here [file normalize [file dirname [info script]]]
+set repo [file normalize "$here/.."]
+set fish [exec sh -c "command -v fish"]
+
+set fails 0
+
+proc report {ok desc detail} {
+    global fails
+    if {$ok} {
+        puts "ok   $desc"
+    } else {
+        puts "FAIL $desc"
+        puts $detail
+        incr fails
+    }
+}
+
+# What comes back off a pty is a repaint, not a transcript: escape sequences for
+# the cursor and \r for the line start. Strip them so an assertion compares text.
+proc clean {s} {
+    regsub -all {\x1b\][^\x07\x1b]*(\x07|\x1b\\)} $s "" s
+    regsub -all {\x1b\[[0-9;?]*[a-zA-Z]} $s "" s
+    regsub -all {\x1b[()][A-Za-z0-9]} $s "" s
+    regsub -all {\x1b[=>]} $s "" s
+    return [string map [list "\x00" "" "\r" "\n"] $s]
+}
+
+proc has_line {s want} {
+    foreach line [split $s "\n"] {
+        if {[string trim $line] eq $want} {
+            return 1
+        }
+    }
+    return 0
+}
+
+# The prompt comes from the generated rc, so seeing it proves the rc finished and
+# the binding is installed. A blind sleep alone raced under load: keys that arrive
+# first are read by a shell not yet holding the binding, and the case then fails
+# as though the code were broken.
+#
+# The settle after it is not redundant. fish flushes pending input as it takes
+# over the terminal, so a key sent between the prompt and that flush is discarded
+# outright — the case then sees a line that was never typed.
+proc wait_ready {} {
+    expect "RDY> "
+    sleep 1
+}
+
+proc slurp {path} {
+    if {![file exists $path]} {
+        return ""
+    }
+    set f [open $path r]
+    set s [read $f]
+    close $f
+    return $s
+}
+
+# Stub clipboard plus the real core on PATH, so nothing here can reach pbcopy.
+# Same technique as test/fish-tests.fish.
+set box [exec mktemp -d]
+set f [open "$box/recite-clip" w]
+puts $f "#!/bin/sh"
+puts $f "cat > \"$box/copied\""
+close $f
+exec chmod 755 "$box/recite-clip"
+exec cp "$repo/functions/recite-core" "$box/recite-core"
+
+set rc "$box/rc.fish"
+set f [open $rc w]
+puts $f "function fish_greeting; end"
+puts $f "function fish_prompt; printf 'RDY> '; end"
+puts $f "function fish_right_prompt; end"
+puts $f "source $repo/functions/recite.fish"
+puts $f "source $repo/functions/__recite_submit.fish"
+puts $f "abbr -a zzq 'echo ABBR_EXPANDED'"
+puts $f "bind alt-enter __recite_submit"
+puts $f "function __recite_test_dump; commandline -b > $box/buffer; end"
+puts $f "bind alt-z __recite_test_dump"
+close $f
+
+set env(PATH) "$box:/usr/bin:/bin"
+set env(TERM) dumb
+
+# Case A: an abbreviation must expand, exactly as it does under plain enter.
+# The needle is a whole line — the executed command line mentions ABBR_EXPANDED
+# too, and only the command's own output proves the expansion actually ran.
+spawn $fish --no-config -i -C "source $rc"
+wait_ready
+send "zzq"
+sleep 0.6
+send "\033\r"
+sleep 2
+send "exit\r"
+expect eof
+catch {exec kill -9 [exp_pid]}
+catch wait
+set a [clean $expect_out(buffer)]
+
+report [expr {[has_line $a "ABBR_EXPANDED"]
+              && [string first "Unknown command" $a] == -1}] \
+    "an abbreviation expands under the binding" \
+    "     transcript: \[$a\]"
+
+# Case B: a half-typed construct must be left alone. Wrapped, it neither parses
+# nor executes, and every further press wraps the wrapping.
+set fragment "echo \"unterminated"
+exec rm -f "$box/buffer" "$box/copied"
+spawn $fish --no-config -i -C "source $rc"
+wait_ready
+send $fragment
+sleep 0.6
+send "\033\r"
+sleep 2
+send "\033z"
+sleep 1
+send "\003"
+sleep 0.6
+send "exit\r"
+expect eof
+catch {exec kill -9 [exp_pid]}
+catch wait
+set dumped [slurp "$box/buffer"]
+
+# The existence check is load-bearing: without it a dump key that never fired
+# reports ok, because a missing file contains no wrapper either.
+report [expr {[file exists "$box/buffer"]
+              && [string trim $dumped] eq $fragment}] \
+    "an incomplete command line is not wrapped" \
+    "     want buffer: \[$fragment\]\n     got buffer:  \[[string trim $dumped]\]"
+
+# Case C: a trailing comment must not swallow the appended suffix. Concatenated,
+# the `#` comments out `2>&1 | recite --as …`: the command runs bare, nothing is
+# copied, and nothing says so.
+#
+# The needle is the clipboard file, never the transcript: the command runs and
+# prints either way, so its output on screen is true of the bug and of the fix
+# alike. A whole-line match keeps the `$ echo …` header from answering for the
+# output it is supposed to introduce.
+exec rm -f "$box/buffer" "$box/copied"
+spawn $fish --no-config -i -C "source $rc"
+wait_ready
+send "echo RECITE_COMMENT_CASE # note"
+sleep 0.6
+send "\033\r"
+sleep 2
+send "\003"
+sleep 0.6
+send "exit\r"
+expect eof
+catch {exec kill -9 [exp_pid]}
+catch wait
+set copied [slurp "$box/copied"]
+
+report [has_line $copied "RECITE_COMMENT_CASE"] \
+    "a trailing comment does not swallow the suffix" \
+    "     clipboard: \[$copied\]"
+
+# Case D: a trailing semicolon. Concatenated, `… ; 2>&1 | recite` is a parse
+# error and the command never runs at all.
+#
+# The obvious assertion — that the session does not print "Expected a string" —
+# is worthless twice over. Under TERM=dumb fish paints nothing for a line it
+# refuses to execute, so that error never reaches the transcript against the bug
+# either; and the ctrl-C below flushes the transcript regardless. The clipboard is
+# the only witness that the command ran at all.
+exec rm -f "$box/buffer" "$box/copied"
+spawn $fish --no-config -i -C "source $rc"
+wait_ready
+send "echo RECITE_SEMI_CASE;"
+sleep 0.6
+send "\033\r"
+sleep 2
+send "\003"
+sleep 0.6
+send "exit\r"
+expect eof
+catch {exec kill -9 [exp_pid]}
+catch wait
+set copied [slurp "$box/copied"]
+
+report [has_line $copied "RECITE_SEMI_CASE"] \
+    "a trailing semicolon still parses and runs" \
+    "     clipboard: \[$copied\]"
+
+# Case E: a trailing ampersand, the same parse error from the other direction.
+# Inside the block it backgrounds a statement instead of colliding with the
+# redirection an appended suffix puts after it.
+exec rm -f "$box/buffer" "$box/copied"
+spawn $fish --no-config -i -C "source $rc"
+wait_ready
+send "echo RECITE_AMP_CASE &"
+sleep 0.6
+send "\033\r"
+sleep 2
+send "\003"
+sleep 0.6
+send "exit\r"
+expect eof
+catch {exec kill -9 [exp_pid]}
+catch wait
+set copied [slurp "$box/copied"]
+
+report [has_line $copied "RECITE_AMP_CASE"] \
+    "a trailing ampersand still parses and runs" \
+    "     clipboard: \[$copied\]"
+
+exec rm -rf $box
+exit $fails

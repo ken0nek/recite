@@ -1,0 +1,18 @@
+#!/bin/sh
+# recite-clip — write stdin to the system clipboard.
+#
+# Split from recite-core so the formatter stays a pure filter, golden-testable
+# without touching a clipboard.
+#
+# M0 is macOS only. A later milestone adds the fallback chain (wl-copy, xclip,
+# xsel, clip.exe, OSC 52); this is the seam it plugs into.
+#
+# Exit: 0 ok · 4 no clipboard backend available
+set -u
+
+if command -v pbcopy > /dev/null 2>&1; then
+  exec pbcopy
+fi
+
+echo "recite-clip: no clipboard backend found (this build supports pbcopy only)" >&2
+exit 4

@@ -1,0 +1,2 @@
+git remote: https://alice:s3cr3t-token@github.com/o/r.git
+DATABASE_URL=postgres://admin:hunter2@db.internal:5432/prod
