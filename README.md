@@ -116,11 +116,21 @@ character by default. Ghostty needs `macos-option-as-alt`. Terminal.app has "Use
 Option as Meta Key" **off**. iTerm2 sets it per profile. The suffix form works
 regardless.
 
-Two things to expect from it. The binding runs your line inside a `begin`/`end`
-block. So `set -l` typed at the prompt is local to that block and does not
-survive the command — `set` and `set -g` do. And a command that redirects its own
-stdout (`cmd > file`) copies a block with no output in it. The output went to the
-file, and recite only sees what reaches the pipe.
+Three things to expect from it.
+
+**What runs is not what you typed.** The binding wraps your line in a
+`begin`/`end` block and appends the pipe, so pressing the key turns one line into
+three and echoes those before the output. Nothing is wrong. The wrapper is what
+keeps a trailing `#`, `;` or `&` from colliding with the suffix, and a newline is
+the only separator a `#` cannot comment out. How far the middle lines indent
+depends on your prompt.
+
+**`set -l` does not survive the command.** It is local to that block. `set` and
+`set -g` do.
+
+**A command that redirects its own stdout** (`cmd > file`) copies a block with no
+output in it. The output went to the file, and recite only sees what reaches the
+pipe.
 
 ## Options
 
