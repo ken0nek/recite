@@ -114,10 +114,23 @@ fragment. So `for`, `if` and an unclosed quote still work. What you lose is addi
 a second *complete* line. `shift-enter` may cover that, depending on whether your
 terminal sends a sequence distinct from `enter`.
 
-**On macOS the keystroke can fail to arrive**, because Option is composed as a
-character by default. Ghostty needs `macos-option-as-alt`. Terminal.app has "Use
-Option as Meta Key" **off**. iTerm2 sets it per profile. The suffix form works
-regardless.
+**On macOS the keystroke can fail to arrive**, in two unrelated ways, and the fix
+for one does nothing for the other. Measured per terminal:
+
+| Terminal | `alt-enter` | What it needs |
+|---|---|---|
+| Ghostty 1.3.1 | arrives | nothing |
+| iTerm2 3.6.11 | arrives | nothing |
+| Terminal.app 2.15 | arrives as a bare `enter` | Settings → Profiles → Keyboard → "Use Option as Meta Key" |
+| WezTerm 20240203 | never leaves the terminal | it is Toggle Full Screen — rebind it, or `{ key = 'Enter', mods = 'ALT', action = wezterm.action.DisableDefaultAssignment }` |
+
+Terminal.app composes Option into a character, so the shell is handed a plain
+`enter` and the binding never runs; that is what `macos-option-as-alt` and its
+equivalents are for, and Ghostty needs no such setting here because Option+Enter
+composes no character to begin with. WezTerm gets the modifier right and then
+keeps the keystroke for itself. Older versions of any of them may differ.
+
+The suffix form works everywhere, with no configuration and no binding.
 
 Three things to expect from it.
 
