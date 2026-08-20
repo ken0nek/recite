@@ -82,16 +82,20 @@ function recite --description 'Copy a command and its output as a pasteable cons
         return 2
     end
 
-    # Two ways in, quarantined here so recite-core never knows which happened:
-    #   - binding: __recite_submit read the line BEFORE mutating it, so --as is exact.
-    #   - hand-typed suffix: recovered from history, best-effort.
-    #     __recite_strip_suffix returns nothing unless the line ends in a recite
-    #     suffix, so an unrelated line yields no header rather than a wrong one.
+    # One way in: the binding. __recite_submit reads the line BEFORE mutating
+    # it, so --as is exact.
+    #
+    # There used to be a second path here — recover the command from
+    # $history[1] for hand-typed `cmd | recite`. Removed: recite runs as the
+    # tail of the very line it would be reading, and fish does not commit a
+    # line to history until it finishes executing. $history[1] during that
+    # window is always the PREVIOUS line, not this one — so the fallback did
+    # not degrade to no header, it confidently attached someone else's command
+    # to this output. No header beats a wrong one; use --as for hand-typed
+    # usage that wants a header.
     set -l cmd
     if set -q _flag_as
         set cmd $_flag_as
-    else if set -q history[1]
-        set cmd (__recite_strip_suffix $history[1])
     end
 
     set -l core_args

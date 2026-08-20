@@ -30,22 +30,16 @@ RECITE_TEST_BINDING=1 test/all.sh       # adds the alt-enter pty case; timing-se
 
 ## Tests
 
-The fish suite is two groups, and which one you are in decides whether a failure means your
-code or your machine.
-
-- **The `check` assertions call `__recite_strip_suffix` by name** and rely on fish to
-  autoload it from `~/.config/fish/functions`, so they **work only after `./install.sh`**.
-  Without the links they do not skip — every one fails with `Unknown command`. The golden
-  suite is unaffected. `run.sh` invokes `recite-core` by path.
-- **The `fish --no-config` children below them are hermetic**: each sources `recite.fish` by
-  path inside a `mktemp -d` sandbox, with a stub `recite-clip` that records to a file. No
-  install is needed, the real clipboard is never touched, and a failure means the code is
-  wrong rather than the environment. They cover both resolution branches, `--version`, header
-  redaction, and the order of the guard against the `tee`.
+The fish suite runs as `fish --no-config` children, hermetic: each sources `recite.fish` by
+path inside a `mktemp -d` sandbox, with a stub `recite-clip` that records to a file. No
+install is needed, the real clipboard is never touched, and a failure means the code is
+wrong rather than the environment. They cover both resolution branches, `--version`, header
+redaction, the absence of a header when no `--as` is given, and the order of the guard
+against the `tee`.
 
 Do not write the assertion counts into this file. They were wrong here once already.
 
-Two traps that made earlier versions of those cases pass against broken code:
+Three traps that made earlier versions of those cases pass against broken code:
 
 - **`2>&1 | …` does not carry stderr in fish** — it wants `&|`. An assertion that greps a
   subshell's stderr silently matches nothing and reports `ok`. Assert on a file the stub
@@ -53,6 +47,11 @@ Two traps that made earlier versions of those cases pass against broken code:
 - **A fixture missing one half proves nothing.** The cwd-execution case needs a plausible
   `recite-clip` beside the planted `recite-core`, or the guard rejects the *clip* and
   returns before the plant is ever reached.
+- **fish `printf` has no `--`, and `$history` is read at startup.** Both empty a fixture in
+  silence. Handed `--`, fish prints the two dashes and DROPS the format after it; and
+  `XDG_DATA_HOME`/`fish_history` set inside the `-c` string arrive after fish resolved its
+  history file. Either one leaves `$history` empty, which is what a passing header case
+  looks like whether or not the fallback is back.
 
 **Reintroduce the bug that every new case covers** and confirm that the case fails. Three
 of the first drafts passed against broken code.
@@ -90,14 +89,18 @@ reuse these goldens as its acceptance criteria.
   matching for the byte-exact goldens.
 - **POSIX `sh`, and awk rather than sed** for text work. Use `+`, never `{n,}` intervals:
   BWK awk `20070501` lacked them, and the portability matrix spans BWK, gawk and mawk.
-- **Do not move `recite-core` and `recite-clip` into `bin/`.** All five files live in a root
+- **Do not move `recite-core` and `recite-clip` into `bin/`.** All four files live in a root
   `functions/`, one copy each, no symlinks — fisher ships that directory regardless of file
   type, and any other layout costs either a duplicate or a symlink to feed it.
-- **Do not "improve" `__recite_strip_suffix` into a guess.** It returns nothing unless the
-  history line actually ends in a recite suffix. Degraded (no `$ cmd` header) beats
-  plausibly wrong.
+- **There is no `$history[1]` fallback for the hand-typed `cmd | recite` path, and do not add
+  one back.** `recite` runs as the tail of the very line it would be reading, and fish does
+  not commit a line to history until it finishes executing — so `$history[1]` there is
+  structurally always the PREVIOUS line, never this one. It does not degrade to no header, it
+  confidently attaches someone else's command to this output. No header beats a wrong one;
+  `--as` is the only way hand-typed usage gets one.
 - **Keep the PATH-first resolution branch in `recite.fish` and nowhere else** — the same file
-  that quarantines the two command-string paths.
+  that owns the one command-string path (`--as`), whether the user passes it directly or
+  `__recite_submit` fills it in for the binding.
 - **Never install a keybinding.** A shipped one turns any change of the default key into a
   migration. The README tells the user to paste `bind alt-enter __recite_submit`. There is
   deliberately no `conf.d/`.

@@ -22,16 +22,16 @@ jobs:
       - name: Install fish
         run: brew install fish
 
-      # The next two steps are traps, not ceremony.
-      #
-      # install.sh exits 1 when ~/.local/bin is off PATH, and $GITHUB_PATH only
-      # affects LATER steps — so this has to precede the install, not follow it.
+      # A trap, not ceremony: install.sh exits 1 when ~/.local/bin is off PATH,
+      # and $GITHUB_PATH only affects LATER steps — so this has to precede the
+      # install, not follow it.
       - name: Put ~/.local/bin on PATH
         run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      # And the fish suite does not SKIP when the functions are not linked. It
-      # calls __recite_strip_suffix by name and relies on fish to autoload it, so
-      # without this every one of those assertions fails with `Unknown command`.
+      # No suite needs this: run.sh invokes recite-core by path and the fish
+      # cases source recite.fish inside a sandbox. It runs because it is the
+      # only coverage install.sh has — a link contract that breaks here breaks
+      # every clone-and-install user, silently.
       - name: Install
         run: ./install.sh
 

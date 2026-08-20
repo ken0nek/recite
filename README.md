@@ -39,8 +39,11 @@ brew list --installed-on-request 2>&1 | recite
 Both print to the terminal as normal and put the block on the clipboard.
 
 Prefer the binding: it reads the command line *before* it appends, so the command
-string is exact. The suffix path recovers it from history and **emits no
-`$ command` header at all** unless the history line ends in a recite suffix.
+string is exact. The suffix path **never emits a `$ command` header** — `recite` is
+the tail of the very line it would need to read back, and fish doesn't commit a line
+to its history until that line finishes running, so there is no reliable way to
+recover it from inside the pipeline itself. Pass `--as '<cmd>'` by hand if you want an
+exact header without the binding.
 
 ## Install
 

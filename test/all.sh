@@ -2,7 +2,7 @@
 # Run every recite test suite.
 #
 #   run.sh            golden files for recite-core  (pure, no side effects)
-#   fish-tests.fish   fish-side command recovery    (pure, needs fish)
+#   fish-tests.fish   the fish `recite` function    (sandboxed, needs fish)
 #   clipboard.sh      recite-clip round-trip        (CLOBBERS the clipboard)
 #   binding.sh        the alt-enter binding         (drives a real pty)
 #
@@ -17,7 +17,7 @@ echo "== recite-core goldens =="
 "$dir/run.sh" || status=1
 
 echo
-echo "== fish command recovery =="
+echo "== fish layer =="
 if command -v fish > /dev/null 2>&1; then
   fish "$dir/fish-tests.fish" || status=1
 else

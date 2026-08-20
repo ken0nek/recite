@@ -1,69 +1,24 @@
 #!/usr/bin/env fish
-# Unit tests for the fish-side command-string recovery.
+# Fish-layer tests: the `recite` function itself.
 #
-# The one piece of the fish layer with real logic, and its failure mode is the
-# nasty kind: silently labelling output with the WRONG command.
-
-set -g fails 0
-
-function check -a desc input want
-    # Collected, or a multi-line result arrives here already split into a list and
-    # "$got" compares it space-joined — which would silently flatten exactly the
-    # newlines the last two cases exist to pin. Single-line cases are unaffected.
-    set -l got (__recite_strip_suffix $input | string collect)
-    if test "$got" = "$want"
-        echo "ok   $desc"
-    else
-        echo "FAIL $desc"
-        echo "     input: [$input]"
-        echo "     want:  [$want]"
-        echo "     got:   [$got]"
-        set -g fails (math $fails + 1)
-    end
-end
-
-check "plain suffix"          'echo hi | recite'                  'echo hi'
-check "2>&1 suffix"           'echo hi 2>&1 | recite'             'echo hi'
-check "suffix with flags"     'echo hi 2>&1 | recite --no-redact' 'echo hi'
-check "no spaces around pipe" 'echo hi|recite'                    'echo hi'
-check "pipeline preserved"    'ls | sort | recite'                'ls | sort'
-
-# The safety guard: a line NOT ending in a recite suffix is not this command, so
-# returning nothing (and omitting the header) is correct. Guessing would attach
-# someone else's command to this output.
-check "unrelated history line" 'brew list' ''
-check "empty history line"     '' ''
-
-# Asserted so the best-effort limit is a known quantity: a literal '| recite'
-# inside a quoted string still survives, because the match anchors on the LAST.
-check "quoted pipe inside" 'echo "a | recite b" | recite' 'echo "a | recite b"'
-
-# fish stores a multi-line command as ONE history entry containing newlines.
-# Without `string collect` both cases below yield a flattened, wrong command
-# string: the substitution splits the entry into a list, so the guard compares a
-# space-joined list against a newline-carrying original — never equal, so the
-# guard never fires. The first case is the dangerous one; it is how someone
-# else's command gets attached to this output.
-check "multi-line, unrelated" 'for i in 1 2
-echo hello
-end' ''
-check "multi-line with suffix" 'for i in 1 2
-echo hello
-end | recite' 'for i in 1 2
-echo hello
-end'
-
-# ---------------------------------------------------------------------------
-# The `recite` function itself.
+# There used to be a first section here too — unit tests for
+# __recite_strip_suffix, which recovered a hand-typed command from
+# $history[1]. Removed along with the function: recite runs as the tail of
+# the very line it would have been reading, and fish does not commit a line
+# to history until it finishes executing, so $history[1] during that window
+# was always the PREVIOUS line, not this one. It did not degrade to no
+# header — it confidently attached someone else's command to this output.
 #
-# Everything above tests one pure string function. Nothing else covers the
-# pipeline — not the resolver, not the tee, not the ORDER between them — and
-# without that a guard that destroys the command's output passes green.
+# Nothing else covers the pipeline — not the resolver, not the tee, not the
+# ORDER between them — and without that a guard that destroys the command's
+# output passes green.
 #
 # Two properties make these safe unattended: a stub `recite-clip` means the real
 # clipboard is never touched, and each case runs in a `fish --no-config` child
-# that `source`s recite.fish by path. So unlike the assertions above they do NOT
-# need `./install.sh`, and a failure means the code is wrong, not the environment.
+# that `source`s recite.fish by path. So they do NOT need `./install.sh`, and a
+# failure means the code is wrong, not the environment.
+
+set -g fails 0
 
 function check_eq -a desc got want
     if test "$got" = "$want"
@@ -78,7 +33,7 @@ end
 
 set -l repo (path resolve (dirname (status -f))/..)
 set -l box (mktemp -d)
-mkdir -p $box/onpath $box/fisher $box/lonely $box/plant $box/checkout $box/autoload $box/tmp $box/tmp-refuse $box/slowcore $box/tmp2
+mkdir -p $box/onpath $box/fisher $box/lonely $box/plant $box/checkout $box/autoload $box/tmp $box/tmp-refuse $box/slowcore $box/tmp2 $box/hist/fish
 
 # Stand-in clipboard: records what it was handed instead of running pbcopy.
 printf '#!/bin/sh\ncat > "%s"\n' $box/copied >$box/onpath/recite-clip
@@ -101,6 +56,24 @@ check_eq "clipboard block is fenced, headed and redacted" (command cat $box/copi
 rm -f $box/copied
 fish --no-config -c "$onpath; printf 'x\n' | recite --as 'deploy --token sk-live-AAABBB'" >/dev/null 2>&1
 check_eq "the \$ command header is redacted too" (command cat $box/copied | string join '|') '```console|$ deploy --token [REDACTED]|x|```'
+
+# Hand-typed `cmd | recite` gets NO header, and must keep getting none. It once
+# read $history[1] — but recite runs as the tail of the very line it would be
+# reading, and fish does not commit a line until that line finishes, so the
+# entry sitting there is the PREVIOUS one. Seeded with an unrelated line here:
+# that is exactly what the fallback used to attach to this output.
+#
+# Both variables have to be in the environment fish STARTS with. Set from inside
+# the -c string they arrive too late — fish has resolved its history file by
+# then, $history comes out empty, and the case passes against the very fallback
+# it exists to forbid.
+# `printf '%s\n' …`, because fish's printf has no `--`: handed one it prints the
+# two dashes and DROPS the rest, leaving a history file with no entry in it —
+# which empties $history and passes this case against the fallback again.
+printf '%s\n' '- cmd: brew list' '  when: 1700000000' >$box/hist/fish/recite_history
+rm -f $box/copied
+env XDG_DATA_HOME=$box/hist fish_history=recite fish --no-config -c "$onpath; printf 'x\n' | recite" >/dev/null 2>&1
+check_eq "history never becomes a header" (command cat $box/copied | string join '|') '```console|x|```'
 
 # A version query must not have side effects.
 rm -f $box/copied
