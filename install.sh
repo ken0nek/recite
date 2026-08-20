@@ -172,6 +172,25 @@ if command -v fish > /dev/null 2>&1; then
   for f in "$repo"/functions/*.fish; do
     link "$f" "$fishdir/${f##*/}"
   done
+
+  # The loop above only ever ADDS, so an upgrade in place keeps a link to every
+  # function this repo has ever shipped. Walk the destination too and drop the
+  # ones whose source is gone.
+  #
+  # Two conditions, and both are the safety: a DANGLING link cannot be a live
+  # install, and a link into $repo cannot be anyone else's. A real file there is
+  # Homebrew's copy or the user's own, and neither is ours to touch — the same
+  # contract remove_link keeps on the way out.
+  for f in "$fishdir"/*.fish; do
+    [ -L "$f" ] || continue
+    [ -e "$f" ] && continue
+    case $(readlink "$f") in
+      "$repo"/*)
+        rm -f "$f"
+        printf 'prune    %s\n' "$f"
+        ;;
+    esac
+  done
 else
   printf 'skip     fish not installed, so fish functions are not linked\n'
 fi

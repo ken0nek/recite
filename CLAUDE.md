@@ -20,7 +20,7 @@ fish layer never learns how it works, which is what keeps a future Go core a dro
 ## Commands
 
 ```sh
-test/all.sh                             # golden + fish suites (no side effects)
+test/all.sh                             # golden, fish and install suites (no side effects)
 test/run.sh redact-jwt cap-lines        # one or more golden cases by name
 RECITE_TEST_CLIPBOARD=1 test/all.sh     # adds the real clipboard round-trip (clobbers clipboard)
 RECITE_TEST_BINDING=1 test/all.sh       # adds the alt-enter pty case; timing-sensitive
@@ -36,6 +36,12 @@ install is needed, the real clipboard is never touched, and a failure means the 
 wrong rather than the environment. They cover both resolution branches, `--version`, header
 redaction, the absence of a header when no `--as` is given, and the order of the guard
 against the `tee`.
+
+`install-links.sh` is the third default suite, and it is about deletion rather than
+installation: `install.sh` prunes dangling links out of a directory the user also keeps
+their own functions in, so the cases pin what it must NOT take — a dangling link that is
+not ours, a real file, a live link. Sandboxed through `RECITE_BINDIR` and `RECITE_FISHDIR`,
+so it never touches a real config.
 
 Do not write the assertion counts into this file. They were wrong here once already.
 

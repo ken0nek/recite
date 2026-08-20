@@ -3,6 +3,7 @@
 #
 #   run.sh            golden files for recite-core  (pure, no side effects)
 #   fish-tests.fish   the fish `recite` function    (sandboxed, needs fish)
+#   install-links.sh  install.sh's link contract    (sandboxed, needs fish)
 #   clipboard.sh      recite-clip round-trip        (CLOBBERS the clipboard)
 #   binding.sh        the alt-enter binding         (drives a real pty)
 #
@@ -23,6 +24,10 @@ if command -v fish > /dev/null 2>&1; then
 else
   echo "skip (fish not installed)"
 fi
+
+echo
+echo "== install.sh links =="
+"$dir/install-links.sh" || status=1
 
 echo
 echo "== recite-clip round-trip =="
