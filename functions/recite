@@ -41,7 +41,7 @@ set -u
 # one but not the other is the failure mode. A single string cannot report a
 # skew it is not present on both sides of. test/recite-tests.sh pins them equal,
 # so forgetting the bump goes red rather than shipping.
-version=0.1.1
+version=0.2.0
 
 buf=
 out=

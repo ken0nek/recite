@@ -16,7 +16,7 @@ set -u
 # The one version string in the project: `recite --version` shells out to this
 # rather than carrying its own, so a half-upgraded install reports one version
 # rather than two that agree.
-version=0.1.1
+version=0.2.0
 
 as=
 redact=1
