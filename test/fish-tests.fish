@@ -40,6 +40,12 @@ printf '#!/bin/sh\ncat > "%s"\n' $box/copied >$box/onpath/recite-clip
 chmod 755 $box/onpath/recite-clip
 cp $repo/functions/recite-core $box/onpath/recite-core
 
+# The shared layer goes wherever recite-core goes. recite.fish is a shim now: it
+# resolves `recite` and hands off, so a channel without it exercises the shim's
+# no-backend branch instead of the pipeline, and every assertion below it turns
+# into a test of the error message.
+cp $repo/functions/recite $box/onpath/recite
+
 # PATH channel (Homebrew, install.sh): both halves on PATH, none beside it.
 cp $repo/functions/recite.fish $box/lonely/recite.fish
 set -l onpath "set -x PATH $box/onpath /usr/bin /bin; source $box/lonely/recite.fish"
@@ -85,7 +91,7 @@ check_eq "--version never touches the clipboard" $touched no
 # Sibling fallback — the fisher shape: nothing on PATH, both halves beside
 # recite.fish. Unreachable in CI's PATH-based install, so without this case the
 # branch is never executed anywhere.
-cp $repo/functions/recite.fish $repo/functions/recite-core $box/fisher/
+cp $repo/functions/recite.fish $repo/functions/recite-core $repo/functions/recite $box/fisher/
 cp $box/onpath/recite-clip $box/fisher/recite-clip
 rm -f $box/copied
 fish --no-config -c "set -x PATH /usr/bin /bin; source $box/fisher/recite.fish; printf 'sib\n' | recite --as 'fisher shape'" >/dev/null 2>&1
@@ -94,7 +100,7 @@ check_eq "sibling fallback resolves with an empty PATH" (command cat $box/copied
 # install.sh shape, and why `path resolve` is in there: the autoload path is a
 # SYMLINK and only its target's directory holds the executables. The fisher case
 # above cannot catch this — it copies real files, where resolving is a no-op.
-cp $repo/functions/recite.fish $repo/functions/recite-core $box/checkout/
+cp $repo/functions/recite.fish $repo/functions/recite-core $repo/functions/recite $box/checkout/
 cp $box/onpath/recite-clip $box/checkout/recite-clip
 ln -s $box/checkout/recite.fish $box/autoload/recite.fish
 rm -f $box/copied
@@ -122,6 +128,12 @@ printf '#!/bin/sh\ntouch "%s"\ncat >/dev/null\n' $box/planted-ran >$box/plant/re
 # CLIP and returns before reaching the planted core, which makes this case pass
 # for the wrong reason and prove nothing about $here.
 printf '#!/bin/sh\ncat >/dev/null\n' >$box/plant/recite-clip
+# And a real `recite` beside them, for that same reason one step earlier: the
+# shim resolves `recite` FIRST, so without one here it fails at that and returns
+# before the planted core is reachable — which is this case passing for the
+# wrong reason. With it, a $here of `.` would run this directory's core and the
+# case would go red, which is the point.
+cp $repo/functions/recite $box/plant/recite
 chmod 755 $box/plant/recite-core $box/plant/recite-clip
 rm -f $box/planted-ran
 fish --no-config -c "cd $box/plant; set -x PATH /usr/bin /bin; command cat recite.fish | source; printf 'secret\n' | recite --as x" >/dev/null 2>&1
@@ -230,6 +242,7 @@ printf '%s\n' '#!/bin/sh' \
     'sleep 2' \
     'printf "BLOCK\n"' >$box/slowcore/recite-core
 printf '#!/bin/sh\ncat > "%s"\n' $box/copied2 >$box/slowcore/recite-clip
+cp $repo/functions/recite $box/slowcore/recite
 chmod 755 $box/slowcore/recite-core $box/slowcore/recite-clip
 printf '%s\n' 'set -l box $argv[1]' \
     'set -x PATH $box/slowcore /usr/bin /bin' \

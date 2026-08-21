@@ -3,50 +3,92 @@
 Notes for coding agents that work in this repository.
 
 `recite` copies a command **and its output** as a pasteable ```console block, while the
-output still prints normally. Milestone M0: fish + macOS only.
+output still prints normally. fish and zsh, macOS only.
 
 ```
-recite (fish fn)   resolves the command string, tees to terminal, delegates
-  └── recite-core  POSIX sh + one awk pass: stdin -> formatted block on stdout
-        └── recite-clip  POSIX sh: stdin -> clipboard
+alt-enter          per-shell: rewrites the typed line to end in `| recite --as …`
+  │                  fish  functions/recite.fish + __recite_submit.fish (autoloaded)
+  │                  zsh   the widget `recite init zsh` prints, eval-ed from .zshrc
+  └── recite         POSIX sh: resolves both backends, tees, orders the pipeline
+        └── recite-core  POSIX sh + one awk pass: stdin -> block on stdout
+              └── recite-clip  POSIX sh: stdin -> clipboard
 ```
 
-The split is load-bearing: `recite-core` touches no clipboard, so it is golden-testable as
-a pure filter, and its contract is *stdin + `--as` + `--version` + exit code* only. The
-fish layer never learns how it works, which is what keeps a future Go core a drop-in.
+Two splits, and both are load-bearing.
+
+`recite-core` touches no clipboard, so it is golden-testable as a pure filter, and its
+contract is *stdin + `--as` + `--version` + exit code* only. Nothing above it learns how it
+works, which is what keeps a future Go core a drop-in.
+
+`recite` is everything that is not per-shell: resolution, the tee, the ordering
+constraints, the signal traps. A shell layer is a keybinding and nothing else, which is why
+zsh cost ~25 lines rather than ~110 and why a pipeline fix is one edit rather than one per
+shell. **Put new pipeline behavior in `recite`, never in a shell layer.**
 
 `README.md` is the user-facing half. This file is what to do and what will break.
 
 ## Commands
 
 ```sh
-test/all.sh                             # golden, fish and install suites (no side effects)
+test/all.sh                             # golden, shared, fish, zsh and install suites (no side effects)
 test/run.sh redact-jwt cap-lines        # one or more golden cases by name
 RECITE_TEST_CLIPBOARD=1 test/all.sh     # adds the real clipboard round-trip (clobbers clipboard)
-RECITE_TEST_BINDING=1 test/all.sh       # adds the alt-enter pty case; timing-sensitive
+RECITE_TEST_BINDING=1 test/all.sh       # adds the alt-enter pty cases; timing-sensitive
+RECITE_TEST_CROSS_SHELL=1 test/all.sh   # adds the fish-vs-zsh byte comparison; timing-sensitive
 ./install.sh                            # symlink into ~/.local/bin + fish functions; idempotent
 ./install.sh --uninstall                # remove only symlinks pointing back into this checkout
+recite init zsh                         # the zsh layer, on stdout
 ```
 
 ## Tests
+
+`recite-tests.sh` covers the shared executable, and specifically what no shell layer can
+reach: the version skew between `recite` and `recite-core`, the `init` subcommand, and the
+INT/TERM/HUP traps. **Its signal cases run twice, and the second pass is the one with
+teeth** — macOS `/bin/sh` is bash 3.2, which runs the EXIT trap even when it dies of an
+untrapped signal, so under it the `TERM` and `HUP` traps can be DELETED and the cases still
+pass. The second pass uses `/bin/dash`, which does not, and goes red.
 
 The fish suite runs as `fish --no-config` children, hermetic: each sources `recite.fish` by
 path inside a `mktemp -d` sandbox, with a stub `recite-clip` that records to a file. No
 install is needed, the real clipboard is never touched, and a failure means the code is
 wrong rather than the environment. They cover both resolution branches, `--version`, header
 redaction, the absence of a header when no `--as` is given, and the order of the guard
-against the `tee`.
+against the `tee`. **Every sandbox channel needs a `recite` planted in it**; without one the
+shim takes its no-backend branch and every assertion below becomes a test of an error
+message.
 
-`install-links.sh` is the third default suite, and it is about deletion rather than
-installation: `install.sh` prunes dangling links out of a directory the user also keeps
+The zsh suite sources what `recite init zsh` prints and calls the widget directly with
+`zle` stubbed — zsh resolves a function name before a builtin, so a function named `zle`
+shadows it. `zsh -f` is correct there and wrong in the pty harnesses, which reach the layer
+through a generated rc that `-f` skips along with the system ones.
+
+`cross-shell.sh` is milestone A-min's gate: the same command, through each shell's real
+binding, must reach the clipboard as the same bytes. It compares only what both shells can
+agree on — the `$ command` header where they parse a line differently, the whole block
+otherwise. zsh leaves `interactive_comments` off, so a typed `#` is literal there and a
+comment in fish; both shells are right and no port can close it.
+
+`install-links.sh` is about deletion rather than installation: `install.sh` prunes dangling links out of a directory the user also keeps
 their own functions in, so the cases pin what it must NOT take — a dangling link that is
 not ours, a real file, a live link. Sandboxed through `RECITE_BINDIR` and `RECITE_FISHDIR`,
 so it never touches a real config.
 
 Do not write the assertion counts into this file. They were wrong here once already.
 
-Three traps that made earlier versions of those cases pass against broken code:
+Traps that made earlier versions of these cases pass against broken code:
 
+- **On a pty, expect reads only while an `expect` is running.** During a `sleep` the pty
+  output queue fills and the recited pipeline BLOCKS inside its `tee`. A `send "\003"` in
+  that window is the worst thing to send: INTR flushes the terminal queues, the blocked
+  write completes with the output discarded, and a block with an EMPTY body is copied —
+  which reads exactly like the tee having been skipped. Wait for `recite: copied` rather
+  than sleeping.
+- **BSD `grep` has no GNU `\|` alternation**, and does not say so. `grep -c '^A$\|^B$'`
+  matched one of two lines here while the GNU grep on the same machine matched both: green
+  on one box, red on the next. Use `grep -E`.
+- **A trailing-`#` case cannot assert that the rewritten line PARSES.** An appended suffix
+  parses there too — it is simply commented out. Assert on what the sink received.
 - **`2>&1 | …` does not carry stderr in fish** — it wants `&|`. An assertion that greps a
   subshell's stderr silently matches nothing and reports `ok`. Assert on a file the stub
   touched, not on a stream.
@@ -104,12 +146,30 @@ reuse these goldens as its acceptance criteria.
   structurally always the PREVIOUS line, never this one. It does not degrade to no header, it
   confidently attaches someone else's command to this output. No header beats a wrong one;
   `--as` is the only way hand-typed usage gets one.
-- **Keep the PATH-first resolution branch in `recite.fish` and nowhere else** — the same file
-  that owns the one command-string path (`--as`), whether the user passes it directly or
-  `__recite_submit` fills it in for the binding.
-- **Never install a keybinding.** A shipped one turns any change of the default key into a
-  migration. The README tells the user to paste `bind alt-enter __recite_submit`. There is
-  deliberately no `conf.d/`.
+- **`recite.fish` is a shim and must stay one.** Its only job is the thing a portable script
+  cannot do: ask fish where an autoloaded function came from, so the fisher channel can
+  find its siblings. PATH first, then that directory. Whatever you are tempted to add there
+  belongs in `recite`, where zsh gets it for free.
+- **`recite.fish` keeps an empty `--on-signal INT` handler, and it is load-bearing.** With
+  no handler registered, a non-interactive fish takes SIGINT as a request to abandon the
+  rest of the script — so the function never returns and the 130 that `recite` exited with
+  is never seen. It cleans nothing up; `recite` does that itself.
+- **The zsh widget is a quoted heredoc inside `recite`, not a fifth file.** `recite init
+  zsh` would otherwise have to find a sibling from `$0`, which is a symlink in
+  `~/.local/bin` — and `readlink -f` is not reliably present on the older macOS this
+  supports. `<<'ZSH'` also keeps the apostrophe rule above out of scope.
+- **fish does not move to `init`, and that is forced rather than chosen.** fisher's whole
+  contract is autoloading `functions/*.fish`; an init form would break that channel.
+- **Never install a keybinding, and never write to a shell config.** A shipped one turns
+  any change of the default key into a migration. `install.sh` PRINTS the lines — `bind
+  alt-enter __recite_submit` for fish, `eval "$(recite init zsh)"` plus `bindkey '^[^M'`
+  for zsh — and the README carries them. There is deliberately no `conf.d/`.
+- **No `setopt` in the user's zsh.** Changing their shell options so zsh's output matches
+  fish's would be the tool editing the shell it is a guest in.
+- **Both version strings move together.** `recite` and `recite-core` carry one each, because
+  they are two links now and a channel can upgrade one without the other;
+  `recite-tests.sh` holds them equal. A release moves four pins: those two,
+  `test/cases/version.expected`, and the tag `install.sh` fetches.
 
 ## Docs
 

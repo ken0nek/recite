@@ -19,9 +19,9 @@ blocks — are terminal-locked. Session recorders and terminal-screenshot tools 
 a recording or an image, and whoever receives an image cannot quote, diff, or search
 it. This is text, from any terminal.
 
-## Status: M0
+## Status
 
-fish + macOS. No zsh, no bash, no OSC 52, no Linux clipboard, no Windows.
+fish and zsh, on macOS. No bash, no OSC 52, no Linux clipboard, no Windows.
 
 ## Use
 
@@ -32,7 +32,7 @@ highlighting and line editing are untouched.
 
 Or append the suffix by hand, which needs no keybinding:
 
-```fish
+```sh
 brew list --installed-on-request 2>&1 | recite
 ```
 
@@ -40,10 +40,10 @@ Both print to the terminal as normal and put the block on the clipboard.
 
 Prefer the binding: it reads the command line *before* it appends, so the command
 string is exact. The suffix path **never emits a `$ command` header** — `recite` is
-the tail of the very line it would need to read back, and fish doesn't commit a line
-to its history until that line finishes running, so there is no reliable way to
-recover it from inside the pipeline itself. Pass `--as '<cmd>'` by hand if you want an
-exact header without the binding.
+the tail of the very line it would need to read back, and no shell commits a line to
+its history until that line finishes running, so there is no reliable way to recover
+it from inside the pipeline itself. Pass `--as '<cmd>'` by hand if you want an exact
+header without the binding.
 
 ## Install
 
@@ -63,11 +63,12 @@ Or clone and run the installer:
 git clone https://github.com/ken0nek/recite.git && ./recite/install.sh
 ```
 
-`install.sh` symlinks `recite-core` and `recite-clip` into `~/.local/bin` and the
-fish functions into `~/.config/fish/functions`. It is idempotent, and it replaces
-only symlinks that already point into its own checkout — anything else prints
-`CONFLICT` and is left alone. `RECITE_BINDIR` and `RECITE_FISHDIR` override the
-destinations. `--uninstall` removes exactly what it created.
+`install.sh` symlinks `recite`, `recite-core` and `recite-clip` into `~/.local/bin`
+and the fish functions into `~/.config/fish/functions`. It is idempotent, and it
+replaces only symlinks that already point into its own checkout — anything else
+prints `CONFLICT` and is left alone. `RECITE_BINDIR` and `RECITE_FISHDIR` override
+the destinations. `--uninstall` removes exactly what it created. It writes nothing
+into any shell config; the lines to paste are printed when it finishes.
 
 It also runs from `curl`, in the form that lets you read it first:
 
@@ -79,21 +80,23 @@ less install.sh && sh install.sh
 **That audits `install.sh` only.** Outside a checkout it downloads a release
 tarball and puts `recite-core` — the half that reads your command output — on
 your `PATH`, unseen. The fetch is pinned to a release tag, not `main`. Clone to
-read everything before anything runs. There are three pieces, and the middle one
-is the whole of it:
+read everything before anything runs. Four pieces, and only the top one is
+per-shell:
 
 ```
-recite            fish function   resolves the command string, tees, delegates
-  └── recite-core   POSIX sh+awk  stdin -> formatted block on stdout
-        └── recite-clip  POSIX sh  stdin -> clipboard
+alt-enter          fish function / zsh widget   rewrites the line you typed
+  └── recite         POSIX sh      tees to the terminal, then delegates
+        └── recite-core  POSIX sh+awk  stdin -> formatted block on stdout
+              └── recite-clip  POSIX sh  stdin -> clipboard
 ```
 
 **Do not install two channels.** Both write into `~/.config/fish/functions`, and
 `install.sh` prints `CONFLICT` rather than overwrite what it does not own — the
 loud case. The quiet one is the tap. That directory precedes Homebrew's
 on `$fish_function_path`, so a fisher copy shadows a Homebrew one. `brew upgrade`
-then has no visible effect, and nothing warns you.
-`recite --version` names the function file that is actually live.
+then has no visible effect, and nothing warns you. `recite --version` prints one
+row per component — version beside path — so a half-upgraded install shows as two
+versions rather than as nothing at all.
 
 ### The keybinding is yours to add
 
@@ -104,15 +107,32 @@ any later change of the default key a migration. Paste into your fish config:
 bind alt-enter __recite_submit
 ```
 
-Ghostty leaves `alt-enter` alone, and fzf.fish owns `alt-c`, not this. **fish does
-not leave it alone**: `alt-enter` inserts a newline, which is how you build a
-multi-line command. It is not a binding — fish 4 handles it inside the reader, so
-`bind` never lists it and `bind --erase alt-enter` is what restores it. The recite
-binding costs you that keystroke but keeps the half that matters. On a line fish
-cannot yet parse, the binding inserts the newline itself rather than submit a
-fragment. So `for`, `if` and an unclosed quote still work. What you lose is adding
-a second *complete* line. `shift-enter` may cover that, depending on whether your
-terminal sends a sequence distinct from `enter`.
+**zsh** needs one line more, because zsh has no autoload for a line-editor widget.
+Paste both into `~/.zshrc`:
+
+```sh
+eval "$(recite init zsh)"
+bindkey '^[^M' __recite_submit
+```
+
+`^[^M` is `alt-enter`. Neither line names a path, so both are the same whether
+you installed with Homebrew or `install.sh` — the two channels that put `recite`
+on your `PATH`, which is what the widget needs. fisher is a fish plugin manager
+and installs nothing for zsh. `recite init zsh` prints the widget on stdout and
+touches nothing else; read it first if you like. The zsh widget expands no
+abbreviations, because zsh has no built-in abbreviation to expand — so what you
+typed is what runs, and the header is exact for free.
+
+Ghostty leaves `alt-enter` alone, and fzf.fish owns `alt-c`, not this. **Your shell
+does not leave it alone**: in both shells `alt-enter` inserts a newline, which is
+how you build a multi-line command. In fish it is not even a binding — fish 4
+handles it inside the reader, so `bind` never lists it and `bind --erase alt-enter`
+is what restores it; in zsh it is `self-insert-unmeta`, which `bindkey -r '^[^M'`
+restores. The recite binding costs you that keystroke but keeps the half that
+matters. On a line the shell cannot yet parse, the binding inserts the newline
+itself rather than submit a fragment. So `for`, `if` and an unclosed quote still
+work. What you lose is adding a second *complete* line. `shift-enter` may cover
+that, depending on whether your terminal sends a sequence distinct from `enter`.
 
 **On macOS the keystroke can fail to arrive**, in two unrelated ways, and the fix
 for one does nothing for the other. Measured per terminal:
@@ -134,15 +154,16 @@ The suffix form works everywhere, with no configuration and no binding.
 
 Three things to expect from it.
 
-**What runs is not what you typed.** The binding wraps your line in a
-`begin`/`end` block and appends the pipe, so pressing the key turns one line into
-three and echoes those before the output. Nothing is wrong. The wrapper is what
-keeps a trailing `#`, `;` or `&` from colliding with the suffix, and a newline is
-the only separator a `#` cannot comment out. How far the middle lines indent
-depends on your prompt.
+**What runs is not what you typed.** The binding wraps your line in a block —
+`begin`/`end` in fish, `{ }` in zsh — and appends the pipe, so pressing the key
+turns one line into three and echoes those before the output. Nothing is wrong.
+The wrapper is what keeps a trailing `#`, `;` or `&` from colliding with the
+suffix, and a newline is the only separator a `#` cannot comment out. How far the
+middle lines indent depends on your prompt.
 
-**`set -l` does not survive the command.** It is local to that block. `set` and
-`set -g` do.
+**In fish, `set -l` does not survive the command.** It is local to that block;
+`set` and `set -g` do. zsh's `{ }` is a plain group rather than a scope, so a zsh
+assignment survives either way.
 
 **A command that redirects its own stdout** (`cmd > file`) copies a block with no
 output in it. The output went to the file, and recite only sees what reaches the
@@ -152,8 +173,10 @@ pipe.
 
 | | |
 |---|---|
+| `--as '<cmd>'` | The `$ command` header to use, for the hand-typed form |
 | `--no-redact` | Skip credential redaction |
-| `--version` | Version, the live function file, the resolved executables |
+| `--version` | One row per component: version, then the path that resolved |
+| `recite init zsh` | Print the zsh widget on stdout, for `eval` in `~/.zshrc` |
 | `RECITE_MAX_LINES` | Line cap, default `1000` |
 | `RECITE_MAX_BYTES` | Byte cap, default `102400` |
 
@@ -164,21 +187,23 @@ The fence grows past three backticks whenever the output carries a fence of its
 own. So Markdown or a quoted snippet still pastes as one block, and does not end
 early where the content's fence is.
 
-**Export the two caps.** `recite-core` is a separate process, and fish's `set`
-does not export:
+**Export the two caps.** `recite-core` is a separate process, so an unexported
+variable never reaches it — and in fish that is the default:
 
 ```fish
 set -x RECITE_MAX_LINES 50    # works
 set RECITE_MAX_LINES 50       # silently does nothing
 ```
 
-`--version` also answers to `-v`, because fish's `argparse` derives a short flag
-from every long option. Spelled in full it never touches the clipboard. As `-v`
-with something piped in, it reports to stderr and still copies, so
-`cmd | recite -v` cannot cost you the output.
+```sh
+export RECITE_MAX_LINES=50    # zsh, and any POSIX shell
+```
+
+`--version` never touches the clipboard, whatever is piped in.
 
 Exit codes: `0` ok · `2` usage · `3` binary input refused · `4` no clipboard
-backend · `130` interrupted.
+backend · `129` hung up · `130` interrupted · `143` terminated. On any of the last
+three the unredacted capture is deleted and the clipboard is left as it was.
 
 ## Redaction is on by default
 

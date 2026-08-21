@@ -95,8 +95,13 @@ proc slurp {path} {
     return $s
 }
 
-# Stub clipboard plus the real core on PATH, so nothing here can reach pbcopy.
-# Same technique as test/fish-tests.fish.
+# Stub clipboard plus the real core and the real shared executable on PATH, so
+# nothing here can reach pbcopy. Same technique as test/fish-tests.fish.
+#
+# `recite` has to be here. Every shell layer is a shim onto it now, so a box
+# holding only the two backends exercises the shim's no-backend branch instead of
+# the pipeline — and every case below that asserts on the clipboard then fails
+# with an empty file, reading as a binding bug.
 set box [exec mktemp -d]
 set f [open "$box/recite-clip" w]
 puts $f "#!/bin/sh"
@@ -104,6 +109,7 @@ puts $f "cat > \"$box/copied\""
 close $f
 exec chmod 755 "$box/recite-clip"
 exec cp "$repo/functions/recite-core" "$box/recite-core"
+exec cp "$repo/functions/recite" "$box/recite"
 
 set rc "$box/rc.fish"
 set f [open $rc w]
@@ -120,6 +126,10 @@ close $f
 
 set env(PATH) "$box:/usr/bin:/bin"
 set env(TERM) dumb
+# zsh reads its rc out of ZDOTDIR, which is how the zsh cases below get a
+# sandboxed config. Harmless to fish, which is told its config on the command
+# line.
+set env(ZDOTDIR) "$box"
 
 # Case A: an abbreviation must expand, exactly as it does under plain enter.
 # The needle is a whole line — the executed command line mentions ABBR_EXPANDED
@@ -243,6 +253,115 @@ set copied [slurp "$box/copied"]
 report [has_line $copied "RECITE_AMP_CASE"] \
     "a trailing ampersand still parses and runs" \
     "     clipboard: \[$copied\]"
+
+# ---------------------------------------------------------------- zsh ----
+#
+# zsh has no autoload for a ZLE widget, so its layer arrives by
+# `eval "$(recite init zsh)"` rather than by being on a function path. That is
+# what these spawn: the same two lines the README tells a zsh user to paste.
+#
+# Two cases, not five. The trailing-comment, semicolon and ampersand cases live
+# in test/zsh-tests.zsh, which runs the rewritten buffer directly and needs no
+# pty for it. What only a pty can answer is whether the KEYSTROKE reaches the
+# widget at all, and what the line editor is left holding when it declines.
+#
+# No abbreviation case: zsh has no built-in abbreviation to expand, so there is
+# nothing for the widget to be accused of skipping.
+set zsh ""
+catch {set zsh [exec sh -c "command -v zsh"]}
+
+# Three-way, and the middle branch is the one worth having. An uncaught error out
+# of `recite init zsh` exits expect before a single zsh case runs, and what the
+# reader sees is a suite that printed five green fish lines and stopped — which
+# looks like a pass with a short tail rather than a gate that never ran.
+set zsh_ready 0
+if {$zsh eq ""} {
+    puts "skip (zsh not installed)"
+} elseif {[catch {exec $box/recite init zsh > $box/init.zsh} err]} {
+    report 0 "zsh: recite init zsh emits a layer" "     $err"
+} else {
+    set zsh_ready 1
+}
+
+if {$zsh_ready} {
+    set f [open "$box/.zshrc" w]
+    puts $f "PROMPT='RDY> '"
+    puts $f "RPROMPT=''"
+    puts $f "source $box/init.zsh"
+    # Braced, so Tcl substitutes nothing inside: `^[` is caret notation for
+    # escape, and a bare `[` opens a command substitution in a Tcl double-quoted
+    # string. These two are verbatim the lines the README gives a zsh user.
+    puts $f {bindkey '^[^M' __recite_submit}
+    puts $f "__recite_test_dump() \{ print -r -- \"\$BUFFER\" > $box/buffer \}"
+    puts $f "zle -N __recite_test_dump"
+    puts $f {bindkey '^[z' __recite_test_dump}
+    close $f
+
+    # ZDOTDIR + -d, NOT -f: `-f` skips the sandbox rc along with the system ones,
+    # so the layer never loads and both cases fail as though the widget were
+    # broken.
+    #
+    # Case Z1: the keystroke reaches the widget and the whole pipeline runs. The
+    # needle is the clipboard file rather than the transcript, for the reason
+    # case C records — the command prints either way.
+    #
+    # `expect` on recite's own "copied", never a blind sleep, and never a ctrl-C.
+    # Measured, and it is the pty rather than the code: expect reads the master
+    # side only while an `expect` is running, so during a `sleep` the pty output
+    # queue fills and the recited pipeline BLOCKS inside its tee. A ctrl-C in that
+    # window is the worst possible thing to send — INTR flushes the terminal
+    # queues, the blocked write completes with the output discarded, and the core
+    # formats a block with an empty body. That copies, and reads exactly like the
+    # tee having been skipped. Waiting for the sink to speak drains the pty and
+    # proves the run finished, both of which a sleep only hopes for.
+    exec rm -f "$box/buffer" "$box/copied"
+    spawn $zsh -di
+    wait_ready
+    send "echo RECITE_ZSH_CASE"
+    sleep 0.6
+    send "\033\r"
+    expect "recite: copied"
+    sleep 0.5
+    send "exit\r"
+    expect eof
+    catch {exec kill -9 [exp_pid]}
+    catch wait
+    set copied [slurp "$box/copied"]
+
+    report [has_line $copied "RECITE_ZSH_CASE"] \
+        "zsh: the binding copies through the shared executable" \
+        "     clipboard: \[$copied\]"
+
+    # Case Z2: a half-typed construct is left alone, the same claim case B makes
+    # for fish. Only a pty can make it: what is under test is the buffer the line
+    # editor is holding after the keystroke, and the assertion is on the file the
+    # dump key wrote, never on the transcript — under TERM=dumb a line that is
+    # never executed is never painted.
+    set fragment "echo \"unterminated"
+    exec rm -f "$box/buffer" "$box/copied"
+    spawn $zsh -di
+    wait_ready
+    send $fragment
+    sleep 0.6
+    send "\033\r"
+    sleep 2
+    send "\033z"
+    sleep 1
+    send "\003"
+    sleep 0.6
+    send "exit\r"
+    expect eof
+    catch {exec kill -9 [exp_pid]}
+    catch wait
+    set dumped [slurp "$box/buffer"]
+
+    # The existence check is load-bearing: without it a dump key that never fired
+    # reports ok, because a missing file contains no wrapper either.
+    report [expr {[file exists "$box/buffer"]
+                  && [string trim $dumped] eq $fragment}] \
+        "zsh: an incomplete command line is not wrapped" \
+        "     want buffer: \[$fragment\]\n     got buffer:  \[[string trim $dumped]\]"
+}
 
 exec rm -rf $box
 exit $fails

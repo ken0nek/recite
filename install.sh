@@ -2,9 +2,10 @@
 # Install recite: executables onto PATH, fish functions into the fish config.
 # Idempotent; safe to re-run.
 #
-# Deliberately installs NO keybinding: writing one into your config would make
-# changing the default key a migration later, and the right key depends on your
-# terminal. The README has the line to paste.
+# Deliberately installs NO keybinding, and nothing at all in .zshrc: writing
+# either into your config would make changing the default key a migration later,
+# and the right key depends on your terminal. The lines to paste are PRINTED at
+# the end of a successful run, and the README has them too.
 #
 # Ownership contract: only ever replaces symlinks that already point into this
 # repo, and refuses to clobber anything else. --uninstall is the same contract in
@@ -139,7 +140,7 @@ remove_link() {
 }
 
 if [ "$action" = uninstall ]; then
-  for name in recite-core recite-clip; do
+  for name in recite recite-core recite-clip; do
     remove_link "$bindir/$name"
   done
   # Walk the fish directory rather than this repo's: readlink still names the
@@ -152,13 +153,17 @@ if [ "$action" = uninstall ]; then
     printf 'Nothing to remove — no symlinks into %s found.\n' "$repo"
   else
     printf '\nRemoved %d symlink(s). The checkout at %s is left in place.\n' "$removed" "$repo"
-    printf 'A `bind alt-enter __recite_submit` line in your fish config is yours to remove.\n'
+    printf 'The lines you added to your own config are yours to remove:\n'
+    printf '    fish  bind alt-enter __recite_submit\n'
+    printf '    zsh   eval "$(recite init zsh)"  and its bindkey\n'
   fi
   exit 0
 fi
 
 mkdir -p "$bindir" || exit 1
-for name in recite-core recite-clip; do
+# `recite` first, because it is the one every shell layer names. The fish
+# functions below are a shim onto it and the two below it are its backends.
+for name in recite recite-core recite-clip; do
   if [ ! -x "$repo/functions/$name" ]; then
     printf 'MISSING  %s is not executable\n' "$repo/functions/$name"
     status=1
@@ -200,9 +205,26 @@ case ":$PATH:" in
   *) printf '\nNOTE     %s is not on PATH\n' "$bindir"; status=1 ;;
 esac
 
+# Printed, never written. install.sh does not edit a shell config: a line it
+# wrote is a line the user did not choose, and changing the default key later
+# would then be a migration rather than an edit they make.
+#
+# Only for the shells that are actually installed, so the output is the two or
+# three lines to paste rather than a menu to read past.
 if [ "$status" -eq 0 ]; then
-  printf '\nInstalled. To bind alt-enter, add to your fish config:\n'
-  printf '    bind alt-enter __recite_submit\n'
+  printf '\nInstalled.'
+  if command -v fish > /dev/null 2>&1; then
+    printf '\n\nTo bind alt-enter, add to your fish config:\n'
+    printf '    bind alt-enter __recite_submit\n'
+  fi
+  if command -v zsh > /dev/null 2>&1; then
+    # Two lines rather than one, and neither names a path: `recite` is on PATH
+    # by the time this prints, so these are identical on every channel.
+    printf '\nAnd to ~/.zshrc:\n'
+    printf '    eval "$(recite init zsh)"\n'
+    printf "    bindkey '^[^M' __recite_submit\n"
+  fi
+  printf '\n'
 fi
 
 exit $status

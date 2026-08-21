@@ -50,12 +50,19 @@ out=$(PATH="$bindir:$PATH" RECITE_BINDIR=$bindir RECITE_FISHDIR=$fishdir sh "$re
 st=$?
 check "install exits 0 with its dirs on PATH" "$st" 0
 
+# Every name is listed, and `recite` is the one worth listing explicitly: it is
+# the entry point every shell layer resolves, so an install.sh that links the two
+# backends and forgets it produces a tree where nothing works and every file is
+# present. The zsh layer has no fallback at all — no sibling directory to try,
+# because `eval "$(recite init zsh)"` cannot run either.
 linked=1
 for f in recite.fish __recite_submit.fish; do
   [ -L "$fishdir/$f" ] || linked=0
 done
-[ -L "$bindir/recite-core" ] && [ -L "$bindir/recite-clip" ] || linked=0
-check "links both executables and every shipped function" "$linked" 1
+for x in recite recite-core recite-clip; do
+  [ -L "$bindir/$x" ] || linked=0
+done
+check "links all three executables and every shipped function" "$linked" 1
 
 # The fix. Without the prune walk this link survives every upgrade, pointing at
 # a file the repo deleted.
@@ -86,7 +93,11 @@ PATH="$bindir:$PATH" RECITE_BINDIR=$bindir RECITE_FISHDIR=$fishdir sh "$repo/ins
 left=no
 [ -L "$fishdir/other.fish" ] && [ -f "$fishdir/mine.fish" ] && left=yes
 check "--uninstall leaves the foreign link and the real file" "$left" yes
+# Both halves, because they are removed by two different loops: the fish
+# functions by a walk of $fishdir, the executables by a fixed list of names that
+# `recite` had to be added to.
 check "--uninstall removes what it linked" "$([ -L "$fishdir/recite.fish" ] && echo present || echo gone)" gone
+check "--uninstall removes the shared executable too" "$([ -L "$bindir/recite" ] && echo present || echo gone)" gone
 
 echo
 if [ "$fails" -eq 0 ]; then

@@ -1,0 +1,82 @@
+# One case, one shell, driven through that shell's REAL binding on a real pty.
+# Run from cross-shell.sh, which is where the opt-in gate, the shell matrix and
+# the reasoning for both live.
+#
+#   argv: <shell> <absolute path to it> <box> <command>
+#
+# The shell is spawned by ABSOLUTE PATH, handed in from the caller. Resolving it
+# here would resolve against the sandboxed PATH below, which deliberately holds
+# nothing but the stubs — so `spawn fish` would fail to spawn at all and the
+# case would report as a fish-layer bug.
+#
+# Sends are per-character and deliberately slow. Faster than the shell's reader
+# and it drops characters, which fails as a bug in the code rather than the test.
+#
+# Every case ends with `expect eof`, a kill and a reap, for the reason
+# binding.exp records: broken code can leave an unparseable line in the buffer,
+# `exit` then appends to that line instead of running, and a bare `wait` blocks
+# forever on a shell that never exits. A gate that hangs is worse than no gate.
+#
+# No ctrl-C here, unlike binding.exp. The INTR character flushes the pty queues,
+# and this file asserts on the file the stub wrote rather than on a transcript,
+# so there is nothing for it to buy and a real chance of it arriving before the
+# pipeline has finished writing.
+
+set timeout 25
+log_user 0
+
+set shell [lindex $argv 0]
+set shpath [lindex $argv 1]
+set box   [lindex $argv 2]
+set cmd   [lindex $argv 3]
+
+set env(PATH) "$box/bin:/usr/bin:/bin"
+set env(TERM) dumb
+set env(ZDOTDIR) "$box"
+
+proc slow {s} {
+    foreach ch [split $s ""] {
+        send -- $ch
+        sleep 0.04
+    }
+}
+
+# The prompt comes from the generated rc, so seeing it proves the rc finished
+# and the binding is installed. The settle after it is not redundant: a shell
+# flushes pending input as it takes over the terminal, so a key sent between the
+# prompt and that flush is discarded outright, and the case then sees a line
+# that was never typed.
+proc wait_ready {} {
+    expect "RDY> "
+    sleep 1.5
+}
+
+switch -- $shell {
+    fish {
+        spawn $shpath --no-config -i -C "source $box/rc.fish"
+    }
+    zsh {
+        # ZDOTDIR + -d, NOT -f. `-f` skips the sandbox rc along with the system
+        # ones, so the port never loads and the case fails as though the widget
+        # were broken.
+        spawn $shpath -di
+    }
+    bash {
+        spawn $shpath --norc --noprofile -i
+    }
+    default {
+        puts "cross-shell.exp: unsupported shell $shell"
+        exit 2
+    }
+}
+
+wait_ready
+slow $cmd
+sleep 0.8
+send "\033\r"
+sleep 3
+send "exit\r"
+expect eof
+catch {exec kill -9 [exp_pid]}
+catch wait
+exit 0

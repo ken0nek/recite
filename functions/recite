@@ -1,0 +1,265 @@
+#!/bin/sh
+# recite — capture a command's output, print it, and copy it as a console block.
+#
+# The shell-agnostic half of the tool. Every shell layer is now just a keybinding
+# that rewrites the command line to end in `2>&1 | recite --as '<what I typed>'`;
+# everything below this line is the same work in every shell, so it lives once.
+#
+# Usage: recite [--as <command string>] [--no-redact] [--version]
+#        recite init <shell>
+#
+# Environment:
+#   RECITE_CORE  path to recite-core, overriding PATH
+#   RECITE_CLIP  path to recite-clip, overriding PATH
+#
+# Exit: 0 copied · 2 usage/no backend/internal · 130 interrupted
+#       otherwise the core's or the clip's own status (3 = input refused)
+#
+# The ORDER of what follows is the whole design, and four steps of it are
+# load-bearing. Each one is a bug this project already shipped and fixed:
+#
+#   1. The executable guard runs BELOW the tee. Above it, an unresolved core
+#      would not merely skip the copy — it would destroy the output and SIGPIPE
+#      whatever is producing it. Printing is the prime directive; failing to
+#      copy is the recoverable half.
+#   2. The core writes to a FILE, and only then does the clip read it. Both
+#      sides of a pipeline start together, so a core that refuses its input
+#      still hands the sink an empty stream and pbcopy destroys whatever the
+#      user had. "Refusing" has to mean the clipboard is left alone.
+#   3. The unredacted capture is deleted as soon as the core has read it,
+#      earlier than the pipeline managed.
+#   4. Signals are trapped for INT, TERM *and* HUP. The fish function this
+#      replaced handled INT alone, which left the unredacted capture on disk for
+#      the other two — the gap the plans index called the most concrete
+#      remaining security hole.
+set -u
+
+# recite-core used to hold the ONE version string, on the reasoning that a
+# second one is a second thing to forget at a release. That reasoning inverted
+# when this file appeared between the shell and the core: the two are separate
+# links now, installed by separate channels, and a `brew upgrade` that replaces
+# one but not the other is the failure mode. A single string cannot report a
+# skew it is not present on both sides of. test/recite-tests.sh pins them equal,
+# so forgetting the bump goes red rather than shipping.
+version=0.1.1
+
+buf=
+out=
+
+# `rm -f ''` is a silent no-op, which is why both paths can be cleared
+# unconditionally before either exists.
+cleanup() {
+  rm -f "$buf" "$out"
+}
+trap 'cleanup' EXIT
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 143' TERM
+trap 'cleanup; exit 129' HUP
+
+self_dir=$(dirname -- "$0")
+
+# PATH first (Homebrew, install.sh), then beside this script (the fisher
+# channel, where nothing is on PATH and the fish shim execs us by path).
+# RECITE_CORE / RECITE_CLIP override both — the injection seam the test suites
+# use, and how the fish shim points at its siblings.
+resolve() {
+  _name=$1
+  _override=$2
+  if [ -n "$_override" ]; then
+    printf '%s\n' "$_override"
+    return 0
+  fi
+  _found=$(command -v "$_name" 2> /dev/null) || _found=
+  if [ -n "$_found" ]; then
+    printf '%s\n' "$_found"
+    return 0
+  fi
+  if [ -x "$self_dir/$_name" ]; then
+    printf '%s\n' "$self_dir/$_name"
+    return 0
+  fi
+  return 1
+}
+
+core=$(resolve recite-core "${RECITE_CORE:-}") || core=
+clip=$(resolve recite-clip "${RECITE_CLIP:-}") || clip=
+
+# `init <shell>` prints a shell's keybinding layer on stdout, for
+# `eval "$(recite init zsh)"` in an rc file.
+#
+# Embedded here rather than shipped as a file: locating a sibling from $0 means
+# resolving a symlink in ~/.local/bin, and `readlink -f` is not reliably present
+# on the older macOS this still supports. A quoted heredoc also keeps the
+# apostrophe rule that governs recite-core's awk program out of scope, since
+# <<'EOF' never reopens the enclosing string.
+#
+# fish is deliberately NOT here. Its layer autoloads out of functions/*.fish,
+# which is the contract fisher ships; an init form would break that channel.
+emit_zsh() {
+  cat <<'ZSH'
+# recite — zsh layer. Bind it yourself, e.g.
+#   bindkey '^[^M' __recite_submit
+# recite installs no keybinding: once installation writes one into your config,
+# changing the default key becomes a migration.
+__recite_submit() {
+  emulate -L zsh
+  local cmd=$BUFFER
+
+  # Empty line: behave exactly like enter.
+  if [[ -z ${cmd//[[:space:]]/} ]]; then
+    zle accept-line
+    return
+  fi
+
+  # A half-typed construct is not a command to submit. Inserting a newline is
+  # alt-enter's own default, so this is the keystroke's other job rather than a
+  # fallback: without it the fragment gets wrapped, refuses to parse, and the
+  # next press wraps the wrapping.
+  #
+  # The buffer goes in on STDIN, never as `-c "$cmd"` — a command line that
+  # begins with a dash would be read as an option there. `-f` so the syntax
+  # check does not load the user's rc; `-n` so it parses without running.
+  if ! print -r -- "$cmd" | zsh -fn 2> /dev/null; then
+    LBUFFER+=$'\n'
+    return
+  fi
+
+  # Wrapped, not appended to. Concatenating the suffix onto a line nothing has
+  # parsed lets trailing syntax collide with it: `#` comments the suffix out and
+  # copies nothing at all, silently; `;` and `&` make it a syntax error that
+  # never runs the command; and `> file` still reports a copy over a block with
+  # empty output.
+  #
+  # Newlines rather than semicolons: a `#` comment ends at its line, so only a
+  # newline puts the closing brace out of its reach.
+  #
+  # ${(qq)} is fish's `string escape` — measured byte-identical for the header
+  # it produces. ${(q)} is NOT the analogue despite being the obvious pick.
+  BUFFER="{"$'\n'"$cmd"$'\n'"} 2>&1 | recite --as ${(qq)cmd}"
+  zle accept-line
+}
+zle -N __recite_submit
+ZSH
+}
+
+if [ "${1:-}" = init ]; then
+  case ${2:-} in
+    zsh) emit_zsh; exit 0 ;;
+    '')  echo "recite: init needs a shell name" >&2; exit 2 ;;
+    fish)
+      echo "recite: fish needs no init — its functions autoload." >&2
+      echo "     Add 'bind alt-enter __recite_submit' to your fish config." >&2
+      exit 2
+      ;;
+    *)   echo "recite: init: unsupported shell: $2" >&2; exit 2 ;;
+  esac
+fi
+
+as=
+core_args=
+have_as=
+
+while [ $# -gt 0 ]; do
+  case $1 in
+    --as)
+      [ $# -ge 2 ] || { echo "recite: --as needs a value" >&2; exit 2; }
+      as=$2
+      have_as=1
+      shift 2
+      ;;
+    --no-redact)
+      core_args="--no-redact"
+      shift
+      ;;
+    --version)
+      # Answered before the executable guard and the stdin check: this is the
+      # diagnostic for a broken or shadowed install, so it has to work when
+      # those are exactly what is wrong.
+      #
+      # One row per component, version and path on the SAME line, because the
+      # thing being diagnosed is a mismatch between two rows. Two separate
+      # blocks — versions here, paths there — is the same information and makes
+      # the reader do the join.
+      core_ver='-'
+      if [ -n "$core" ] && [ -x "$core" ]; then
+        # </dev/null or this hangs forever against a core predating the flag:
+        # its catch-all swallows --version, then blocks reading the stdin it
+        # inherited — precisely the mixed-channel install this diagnoses.
+        core_ver=$("$core" --version < /dev/null 2> /dev/null)
+        # The core prints `recite-core <version>`; that string is its contract
+        # and a golden pins it. Anything else is a core too old to have the
+        # flag, and it is reported verbatim rather than guessed at.
+        case $core_ver in
+          'recite-core '*) core_ver=${core_ver#recite-core } ;;
+          '')              core_ver='(no --version)' ;;
+        esac
+      fi
+      printf '%-12s %-9s %s\n' recite "$version" "$0"
+      printf '%-12s %-9s %s\n' recite-core "$core_ver" "${core:-(unresolved)}"
+      printf '%-12s %-9s %s\n' recite-clip - "${clip:-(unresolved)}"
+      exit 0
+      ;;
+    *)
+      echo "recite: unknown option: $1" >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [ -t 0 ]; then
+  echo "recite: expects a command's output on stdin." >&2
+  echo "     Press alt-enter instead of enter, or append '| recite' to a command." >&2
+  exit 2
+fi
+
+# There is deliberately no history fallback for a hand-typed `cmd | recite`.
+# recite runs as the tail of the very line it would be reading, and no shell
+# commits a line to history until it finishes executing — so the entry sitting
+# there is always the PREVIOUS one. It does not degrade to no header, it
+# confidently attaches someone else's command to this output. `--as` is the only
+# way hand-typed usage gets a header.
+if [ -n "$have_as" ]; then
+  set -- --as "$as"
+  [ -n "$core_args" ] && set -- "$@" "$core_args"
+else
+  set --
+  [ -n "$core_args" ] && set -- "$core_args"
+fi
+
+buf=$(mktemp "${TMPDIR:-/tmp}/recite.XXXXXX") || exit 2
+
+# stdin goes to the terminal verbatim — the output must still look normal — and
+# to a buffer, because the core needs to read it too.
+tee "$buf"
+
+# Checked HERE, after the tee. See constraint 1 in the header.
+if [ -z "$core" ] || [ ! -x "$core" ] || [ -z "$clip" ] || [ ! -x "$clip" ]; then
+  rm -f "$buf"
+  buf=
+  echo "recite: no recite-core/recite-clip on PATH or beside $self_dir" >&2
+  echo "     output above is intact. Nothing was copied." >&2
+  echo "     run 'recite --version' to see what resolved." >&2
+  exit 2
+fi
+
+out=$(mktemp "${TMPDIR:-/tmp}/recite.XXXXXX") || exit 2
+
+"$core" "$@" < "$buf" > "$out"
+core_st=$?
+
+# The unredacted capture lives for the format, not for the copy.
+rm -f "$buf"
+buf=
+
+if [ "$core_st" -ne 0 ]; then
+  exit "$core_st"
+fi
+
+"$clip" < "$out"
+clip_st=$?
+
+if [ "$clip_st" -ne 0 ]; then
+  exit "$clip_st"
+fi
+
+echo "recite: copied" >&2
