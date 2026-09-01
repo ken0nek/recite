@@ -1,0 +1,24 @@
+# config file for the tagpr in git config format
+#
+# tagpr owns the version bump. It opens a release pull request that rewrites
+# every file listed below, and tags the merge.
+#
+# THE ORDER OF versionFile IS LOAD-BEARING. tagpr WRITES all four, but at merge
+# time it READS the version back out of the FIRST one to decide the tag, so the
+# canonical string has to lead. That reader wants the word `version`, a
+# separator, and a semver ON ONE LINE, which is what the `version=` assignment
+# in functions/recite-core is. The other three are written and never read, so
+# their shapes are free.
+#
+# Each file holds exactly ONE semver-shaped string, and that is the precondition
+# rather than a coincidence: tagpr rewrites only the FIRST match per file, so a
+# second one would be left behind in silence.
+#
+# vPrefix is the TAG format alone. What lands in a file is always bare, and
+# install.sh keeps its `v` because the rewrite preserves a leading v it finds,
+# not because of this flag.
+[tagpr]
+	releaseBranch = main
+	versionFile = functions/recite-core,functions/recite,install.sh,test/cases/version.expected
+	vPrefix = true
+	changelog = true

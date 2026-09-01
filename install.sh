@@ -49,8 +49,9 @@ if [ ! -f "$repo/functions/recite-core" ]; then
   if [ "$action" = install ]; then
     # Pinned to a tag, not `main`: reading install.sh only audits install.sh, so
     # a moving branch would mean the file that actually handles your credentials
-    # is whatever was pushed most recently. Bump at each release; RECITE_REF
-    # overrides for testing main.
+    # is whatever was pushed most recently. Nobody bumps this by hand — the
+    # release pull request rewrites the line, because `.tagpr` lists this file
+    # among the ones that carry the version. RECITE_REF overrides for testing main.
     #
     # NOT checksummed, deliberately: GitHub generates archive tarballs on demand
     # rather than storing them, and their bytes changed before (a 2023 gzip

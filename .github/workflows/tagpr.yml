@@ -1,0 +1,44 @@
+name: tagpr
+
+# `main` only, unlike the sibling test workflow's deliberately unfiltered
+# `push`: tagpr acts on the release branch, so a run anywhere else would try to
+# open a release pull request for a feature branch.
+on:
+  push:
+    branches: [main]
+
+# contents: write pushes the release branch and creates the tag and the release.
+# pull-requests: write opens and updates the release pull request. issues: read
+# because the major/minor labels tagpr reads off that pull request come back
+# through the issues API.
+permissions:
+  contents: write
+  pull-requests: write
+  issues: read
+
+jobs:
+  tagpr:
+    runs-on: ubuntu-latest
+    steps:
+      # persist-credentials: false so the push goes out under the token handed
+      # to tagpr below rather than a second one the checkout left in
+      # .git/config. No fetch-depth: 0 — tagpr runs `git fetch --unshallow`
+      # itself when it finds a shallow clone, so it still sees every tag.
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      # THE RELEASE PULL REQUEST GETS NO TEST RUN, and nothing here can close
+      # that. Events authored by GITHUB_TOKEN do not start workflow runs, so
+      # tagpr's push of the release branch fires test.yml not at all — and
+      # test.yml has no `pull_request` trigger, so nothing queues for approval
+      # either. The pull request edits test/cases/version.expected, which the
+      # goldens compare byte for byte: a tested file, changed with no test.
+      #
+      # Coverage comes back only at the merge, and late. The merge push to main
+      # is the merging user's, so test.yml runs then — but so does this job, in
+      # parallel, and it tags without waiting. Read the four version lines in
+      # the diff before merging; that review is the gate.
+      - uses: Songmu/tagpr@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
