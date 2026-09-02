@@ -58,7 +58,7 @@ if [ ! -f "$repo/functions/recite-core" ]; then
     # change broke sha256 pins ecosystem-wide). A pin that upstream can
     # invalidate fails closed on every install at once, and looks exactly like an
     # attack. Revisit if a release ships a real uploaded asset.
-    ref=${RECITE_REF:-v0.3.0}
+    ref=${RECITE_REF:-v0.3.1}
     printf 'fetch    %s@%s\n' "$repo" "$ref"
     mkdir -p "$repo" || exit 1
 
