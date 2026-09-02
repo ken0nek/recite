@@ -30,8 +30,7 @@
 #      earlier than the pipeline managed.
 #   4. Signals are trapped for INT, TERM *and* HUP. The fish function this
 #      replaced handled INT alone, which left the unredacted capture on disk for
-#      the other two — the gap the plans index called the most concrete
-#      remaining security hole.
+#      the other two — the most concrete security hole this tool had.
 set -u
 
 # recite-core used to hold the ONE version string, on the reasoning that a
@@ -205,11 +204,30 @@ while [ $# -gt 0 ]; do
       # on macOS. With stdin closed the same binary aborts, its noise goes to
       # the /dev/null on stderr, and the clipboard survives. --version must
       # never touch the clipboard, whatever is piped in.
+      #
+      # `-` means NOT RUN, and only that: nothing resolved, or what resolved is
+      # missing or not executable. The path on the same line says which, better
+      # than a token could. What it must not also mean is "it ran and said
+      # nothing", because that is two different installs and one of them is the
+      # one this row exists for.
       clip_ver='-'
       if [ -n "$clip" ] && [ -x "$clip" ]; then
-        clip_which=$("$clip" --which <&- 2> /dev/null) || clip_which=
+        clip_which=$("$clip" --which <&- 2> /dev/null)
+        clip_st=$?
         case $clip_which in
           *' confirmed'|*' unconfirmed') clip_ver=${clip_which% *} ;;
+          # 4 is this clip refusing: no pbcopy here, and no terminal to write an
+          # escape sequence to. Anything else is a clip predating --which — it is
+          # `exec pbcopy`, which aborts on the closed stdin rather than answering
+          # (134, measured) — which is the half-upgraded install the whole row is
+          # for, and which used to print the same glyph as a typo in RECITE_CLIP.
+          *)
+            if [ "$clip_st" -eq 4 ]; then
+              clip_ver='(no backend)'
+            else
+              clip_ver='(no --which)'
+            fi
+            ;;
         esac
       fi
       printf '%-12s %-9s %s\n' recite "$version" "$0"

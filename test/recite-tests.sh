@@ -106,7 +106,7 @@ check "an unknown option exits 2" "$?" 2
 # and `recite` owns the wording. OSC 52 is write-only: no terminal replies, so
 # "copied" about it would be a plausibly-correct claim with nothing behind it,
 # which is the one thing this tool refuses to produce. The verb carries the
-# caveat; the shape absorbs every backend a later milestone adds.
+# caveat; the shape absorbs every backend added later.
 printf '#!/bin/sh\ncat > /dev/null\nprintf "pbcopy confirmed\\n"\n' > "$box/clip_pb"
 printf '#!/bin/sh\ncat > /dev/null\nprintf "osc52 unconfirmed\\n"\n' > "$box/clip_osc"
 chmod 755 "$box/clip_pb" "$box/clip_osc"
@@ -117,9 +117,10 @@ check "a confirmed backend is copied, and named" "$msg" "recite: copied (pbcopy)
 msg=$(printf 'x\n' | RECITE_CLIP=$box/clip_osc "$recite" --as x 2>&1 > /dev/null)
 check "an unconfirmed backend is SENT, not copied" "$msg" "recite: sent (osc52)"
 
-# A recite-clip predating B-crit prints nothing at all. Mixed-channel installs
-# are live here — a fisher copy shadows a Homebrew one on $fish_function_path —
-# so this is the case that proves an old sink does not produce a broken message.
+# A recite-clip predating the report line prints nothing at all. Mixed-channel
+# installs are live here — a fisher copy shadows a Homebrew one on
+# $fish_function_path — so this is the case that proves an old sink does not
+# produce a broken message.
 msg=$(printf 'x\n' | RECITE_CLIP=$box/clip "$recite" --as x 2>&1 > /dev/null)
 check "an older recite-clip still reports plainly" "$msg" "recite: copied"
 
@@ -156,6 +157,43 @@ row=$(RECITE_CLIP=$box/clip_w "$recite" --version |
   awk '$1 == "recite-clip" { print $2 }')
 check "--version names the backend, and hands --which a closed stdin" \
   "$row/$(cat "$box/which_rc" 2> /dev/null)" "osc52/catrc=1"
+
+# `-` in the version column has to keep ONE meaning, and that meaning is NOT
+# RUN: nothing resolved, or what resolved is missing or not executable. The path
+# on the same line says which. Four situations used to print it, and the fourth
+# was "it ran and said nothing" — two different installs wearing the same glyph
+# as a typo in RECITE_CLIP, one of them the half-upgraded install this row is
+# for.
+#
+# The two that ran are separated by STATUS. 4 is this clip refusing: no pbcopy
+# here, and no terminal to write an escape sequence to. Anything else is a clip
+# predating --which, which is `exec pbcopy` and does not answer the flag — the
+# stub below models that by reading the stdin it was handed closed, and exiting
+# nonzero without printing, exactly as the real one does.
+#
+# Asserted as the WHOLE ROW rather than a field, because both tokens contain a
+# space and overflow the version column — `(no --version)` on the core row set
+# that precedent, and a field-indexed assertion would silently pass on half a
+# token.
+#
+# REINTRODUCE THE BUG: delete the `*)` arm from the clip `case` in recite's
+# --version so both fall back to `-`, and confirm both of these go red.
+printf '#!/bin/sh\nexit 4\n' > "$box/clip_none"
+printf '#!/bin/sh\ncat > /dev/null\n' > "$box/clip_old"
+chmod 755 "$box/clip_none" "$box/clip_old"
+
+check "a clip that ran and refused says so" \
+  "$(RECITE_CLIP=$box/clip_none "$recite" --version | grep '^recite-clip')" \
+  "recite-clip  (no backend) $box/clip_none"
+
+check "a clip too old to answer --which says that instead" \
+  "$(RECITE_CLIP=$box/clip_old "$recite" --version | grep '^recite-clip')" \
+  "recite-clip  (no --which) $box/clip_old"
+
+# ... and `-` still means not run, for a path that is not there at all.
+check "and a clip that cannot run is still a bare dash" \
+  "$(RECITE_CLIP=$box/nope "$recite" --version | grep '^recite-clip')" \
+  "recite-clip  -         $box/nope"
 
 # ------------------------------------------------------- printing is first ----
 #

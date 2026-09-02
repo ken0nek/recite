@@ -1,5 +1,5 @@
 #!/bin/sh
-# Milestone A-min's gate: the same command, through each shell's own binding,
+# The cross-shell gate: the same command, through each shell's own binding,
 # must reach the clipboard as the same bytes.
 #
 #   docs: same command, same keystroke -> byte-identical clipboard content.
@@ -113,7 +113,7 @@ fi
 
 fails=0
 
-# The cases. A-min names three; the first one is split.
+# The cases. Three questions, and the first one is split.
 #
 # The header and the body are SEPARATE questions and only the header is ours.
 # `echo c # note` runs differently in the two shells — zsh leaves

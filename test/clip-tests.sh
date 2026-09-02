@@ -1,9 +1,10 @@
 #!/bin/sh
 # recite-clip: backend selection, the OSC 52 emitter, --which, and the report line.
 #
-# recite-clip had no suite before B-crit. It gets its own file rather than cases
-# bolted into recite-tests.sh, matching the one-suite-per-component layout the
-# rest of test/ already has.
+# recite-clip had nothing to test until it grew a backend chain — before that it
+# was a single `exec pbcopy` line. It gets its own file rather than cases bolted
+# into recite-tests.sh, matching the one-suite-per-component layout the rest of
+# test/ already has.
 #
 # Hermetic: a mktemp -d sandbox with RECITE_TTY pointed at a file inside it and
 # RECITE_BACKEND forcing selection. The real clipboard is never touched — no case

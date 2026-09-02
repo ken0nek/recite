@@ -17,7 +17,7 @@
 #
 # This ships the two ends of the chain — pbcopy, then OSC 52. The gap between
 # them (wl-copy, xclip, xsel, clip.exe, each guarded on its own display
-# variable) is a later milestone's work; the order is what leaves room for it.
+# variable) is later work; the order is what leaves room for it.
 #
 # Usage: recite-clip [--which]
 #
