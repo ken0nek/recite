@@ -41,8 +41,8 @@ jobs:
   linux:
     name: Linux — goldens only (informational)
     runs-on: ubuntu-latest
-    # Informational on purpose: cross-platform byte-identity is a later
-    # milestone's gate, not an M0 obligation, so it must never gate the build.
+    # Informational on purpose: cross-platform byte-identity is a goal this
+    # project has not committed to yet, so it must never gate the build.
     # This is that gate early and for free — the goldens are byte-compared with
     # `cmp`, so a Linux awk that diverges from macOS BWK shows up immediately.
     #

@@ -63,7 +63,7 @@ The zsh suite sources what `recite init zsh` prints and calls the widget directl
 shadows it. `zsh -f` is correct there and wrong in the pty harnesses, which reach the layer
 through a generated rc that `-f` skips along with the system ones.
 
-`cross-shell.sh` is milestone A-min's gate: the same command, through each shell's real
+`cross-shell.sh` is the cross-shell gate: the same command, through each shell's real
 binding, must reach the clipboard as the same bytes. It compares only what both shells can
 agree on — the `$ command` header where they parse a line differently, the whole block
 otherwise. zsh leaves `interactive_comments` off, so a typed `#` is literal there and a
@@ -207,6 +207,14 @@ reuse these goldens as its acceptance criteria.
   against a `RECITE_TTY` test file. And `:` is a special builtin, so a redirection error on
   it kills a non-interactive `dash` outright; `true` returns false instead. Redirections
   apply left to right, so `2>` has to come first or the failure prints.
+- **`-` in a `--version` row means NOT RUN, and nothing else.** Four situations printed it
+  once — nothing resolved, a missing path, a file that is not executable, and a clip that
+  RAN and answered nothing — so the install this row exists to name wore the same glyph as
+  a typo in `RECITE_CLIP`. The two that ran are separated by status: `4` is the clip
+  refusing (`(no backend)`), anything else is a clip predating `--which`, which is `exec
+  pbcopy` and aborts on the closed stdin (`(no --which)`). Both tokens contain a space and
+  overflow the column, as `(no --version)` already did — assert on the whole row, never on
+  a field.
 - **`recite-clip --which` is called with stdin CLOSED (`<&-`), never `< /dev/null`.** A
   `recite-clip` predating `--which` is `exec pbcopy`, and `pbcopy --which` handed a readable
   `/dev/null` exits 0 and **wipes the clipboard**. With stdin closed it aborts instead and
