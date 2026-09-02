@@ -3,9 +3,18 @@ name: tagpr
 # `main` only, unlike the sibling test workflow's deliberately unfiltered
 # `push`: tagpr acts on the release branch, so a run anywhere else would try to
 # open a release pull request for a feature branch.
+#
+# workflow_dispatch is what makes a non-patch bump reachable. tagpr reads the
+# major/minor label WHEN IT RUNS, and a label carries no push — so labelling the
+# release pull request after the last feature merge changes nothing, and the
+# merge tags a patch. Run this workflow by hand after labelling. A
+# `pull_request: labeled` trigger would automate it and is the wrong tool: that
+# event checks out the pull request HEAD, which for any feature branch is the
+# run the paragraph above rules out.
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 # contents: write pushes the release branch and creates the tag and the release.
 # pull-requests: write opens and updates the release pull request. issues: read

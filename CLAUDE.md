@@ -235,7 +235,10 @@ reuse these goldens as its acceptance criteria.
 - **Both version strings move together.** `recite` and `recite-core` carry one each, because
   they are two links now and a channel can upgrade one without the other;
   `recite-tests.sh` holds them equal. A release moves four pins: those two,
-  `test/cases/version.expected`, and the tag `install.sh` fetches.
+  `test/cases/version.expected`, and the tag `install.sh` fetches. tagpr writes
+  all four and bumps the PATCH unless the release pull request carries
+  `tagpr:minor` or `tagpr:major` — and a label carries no push, so the workflow
+  needs a manual run to read one.
 
 ## Docs
 
