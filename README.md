@@ -21,9 +21,10 @@ it. This is text, from any terminal.
 
 ## Status
 
-fish and zsh, on macOS — and over ssh or inside tmux it writes to the terminal's
-own clipboard, so the text lands on the machine you are sitting at. No bash, no
-Linux clipboard tools, no Windows.
+fish and zsh, on macOS — and where there is no `pbcopy` to reach, on a remote
+host or inside tmux, it writes to the terminal's own clipboard so the text lands
+on the machine you are sitting at. No bash, no Linux clipboard tools, no
+Windows.
 
 ## Use
 
@@ -180,7 +181,7 @@ pipe.
 |---|---|
 | `--as '<cmd>'` | The `$ command` header to use, for the hand-typed form |
 | `--no-redact` | Skip credential redaction |
-| `--version` | One row per component: version, then the path that resolved |
+| `--version` | One row per component: version or backend, then its path |
 | `recite init zsh` | Print the zsh widget on stdout, for `eval` in `~/.zshrc` |
 | `RECITE_MAX_LINES` | Line cap, default `1000` |
 | `RECITE_MAX_BYTES` | Byte cap, default `102400` |
@@ -219,12 +220,14 @@ Nothing acknowledges an OSC 52 write. That is why the message changes:
 ```console
 $ ls | recite --as 'ls'
 recite: copied (pbcopy)
-$ ssh host 'ls' | recite --as 'ls'
+$ ssh host
+host$ ls | recite --as 'ls'
 recite: sent (osc52)
 ```
 
 `sent` means the bytes were emitted and no terminal answers for them. `copied`
-means a backend confirmed the write.
+means a backend confirmed the write. To ask before you paste rather than after,
+`recite --version` names the backend on its clip row.
 
 **Inside tmux, add one line to `~/.tmux.conf`:**
 
@@ -233,13 +236,15 @@ set -g set-clipboard on
 ```
 
 tmux forwards the sequence to the outer terminal *and* keeps a tmux buffer, so
-the text pastes on both sides. tmux only attempts the outer clipboard when that
-terminal's terminfo carries an `Ms` capability; without it the write is a silent
-no-op.
+the text pastes on both sides. At the default `external` it forwards nothing an
+application inside it writes, and the paste comes up empty. tmux also has to
+believe the outer terminal can take a clipboard write: the `Ms` capability, which
+its own `terminal-features` grants to any `xterm*` TERM even when the terminfo
+entry lacks it.
 
-**On a remote host that has its own display**, the chain finds that machine's
-clipboard tool first and the text lands there — on a screen you are not looking
-at. Force the terminal route:
+**On a remote macOS host**, the chain finds that machine's own `pbcopy` first
+and the text lands there — on a screen you are not looking at. Force the
+terminal route:
 
 ```sh
 export RECITE_BACKEND=osc52
@@ -299,8 +304,9 @@ Documented behavior, not bugs.
 - **An OSC 52 write cannot be acknowledged.** No terminal replies to one, so
   recite reports `sent`, not `copied`. If the paste comes up empty, the terminal
   refused or ignored the sequence and nothing could have said so.
-- **Inside tmux it needs one setting.** `set -g set-clipboard on`, and an outer
-  terminal whose terminfo has `Ms`.
+- **Inside tmux it needs one setting.** `set -g set-clipboard on`; the default
+  `external` drops the write. The outer terminal must be one tmux grants `Ms`,
+  which any `xterm*` TERM is by default.
 - Interactive and TUI commands are out of scope under capture.
 
 Out of scope by design: session recording, and images or SVG — the recorders and

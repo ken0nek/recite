@@ -75,12 +75,25 @@ not ours, a real file, a live link. Sandboxed through `RECITE_BINDIR` and `RECIT
 so it never touches a real config.
 
 `clip-tests.sh` is `recite-clip`'s own suite, hermetic through `RECITE_TTY` (the OSC 52
-target) and `RECITE_BACKEND` (selection). The real clipboard is never touched. Two of its
-cases have teeth and both must be confirmed by reintroducing the bug: the **no-newline**
-case, which goes green against a wrapped payload if `| tr -d` is deleted and nothing else
-notices; and the **unopenable target** case, which must not use a nonexistent path in a
-writable directory — append mode *creates* that, and the case would pass against a broken
-probe.
+target) and `RECITE_BACKEND` (selection). The real clipboard is never touched. Four things
+about it will cost you a case that green-lights the bug it names:
+
+- **No write-path case can see `have_osc52`.** The emitter refuses the same situations by
+  its own route and reaches the same exit 4, so a probe check that is deleted stays green
+  across every write case in the file — measured for both the open and the `base64` check.
+  `--which` is the only caller that runs the probe and nothing else, so **every probe check
+  needs a `--which` case**, and that is what pins the open and the encoder.
+- **A sandbox `PATH` replaces the whole system.** `plant` puts `mktemp` and `rm` in every
+  one, because the emitter stages its encode in a file and the traps remove it. Without
+  them a mutation dies on the missing `mktemp` and the case goes red for the wrong reason,
+  which is the same as having no teeth.
+- **The no-newline case does not exercise a wrap here.** macOS `base64` emits 400
+  characters on one line, so deleting `| tr -d` reddens it via the single TRAILING newline;
+  the wrap it is named for is only reachable on a GNU `base64`. The companion assertion is
+  a guard on the fixture, not evidence.
+- **The staging-file cases run under two interpreters**, for the reason `recite-tests.sh`
+  does: under macOS `/bin/sh` the `TERM` and `HUP` traps can be deleted and they still
+  pass.
 
 Do not write the assertion counts into this file. They were wrong here once already.
 
@@ -166,11 +179,24 @@ reuse these goldens as its acceptance criteria.
   zsh` would otherwise have to find a sibling from `$0`, which is a symlink in
   `~/.local/bin` — and `readlink -f` is not reliably present on the older macOS this
   supports. `<<'ZSH'` also keeps the apostrophe rule above out of scope.
+- **The OSC 52 emitter encodes into a file first, and that split is the bug fix.** One
+  command group exits with its LAST command's status — a `printf` of the terminator, which
+  cannot fail — so a `base64` that exists and then fails used to put a well-formed OSC 52
+  with an EMPTY payload on the wire: the terminal reads that as "set the clipboard to
+  nothing", and the run reported a send, exit 0. `base64 > "$enc"` has its own status and
+  nothing reaches the terminal until it passes. The emit is an `&&` chain for the same
+  reason. The staging file is the user's captured output, so `recite-clip` traps EXIT, INT,
+  TERM and HUP for it exactly as `recite` does for its buffers.
+- **`have_osc52` still checks for `base64` even though the emitter now catches it.** The
+  probe's job is SELECTION: it is what `--which` answers from and what the `auto` chain
+  decides on, and naming a backend that cannot encode is the dishonesty this tool exists to
+  avoid. The `tr` check is load-bearing on both paths — without it the ESC prefix is
+  already on the wire when `tr` fails to run.
 - **The backend chain lives in `recite-clip`, and `recite` learns the backend only from its
-  one line of stdout** — `<backend> <confirmed|unconfirmed>`. `recite` owns every
-  user-facing string, so a new backend is one line in `recite-clip` and zero in `recite`.
-  An empty or unparseable line is the SKEW path, not an error: it degrades to the bare
-  `recite: copied` that shipped before.
+  one line of stdout** — `<backend> <confirmed|unconfirmed>`. `recite` owns every string on
+  the success path, so a new backend is one `have_` helper and its `case` arms in
+  `recite-clip`, and zero in `recite`. An empty or unparseable line is the SKEW path, not an
+  error: it degrades to the bare `recite: copied` that shipped before.
 - **That `$(…)` around the clip call captures a status LINE, not the output.** The
   no-command-substitution rule is about the captured text — which still reaches the sink as
   a stream through `< "$out"` — and it still holds for it. Here a stripped trailing newline
@@ -184,8 +210,12 @@ reuse these goldens as its acceptance criteria.
 - **`recite-clip --which` is called with stdin CLOSED (`<&-`), never `< /dev/null`.** A
   `recite-clip` predating `--which` is `exec pbcopy`, and `pbcopy --which` handed a readable
   `/dev/null` exits 0 and **wipes the clipboard**. With stdin closed it aborts instead and
-  the clipboard survives. This is a different trap from the `--version` core call, which
-  needs `< /dev/null` because its hazard is blocking, not wiping — do not unify them.
+  the clipboard survives. The stub in `recite-tests.sh` must REJECT anything but `--which`:
+  with it ignoring argv, dropping the flag left every assertion green, including the one
+  named for it — and against the real clip on the osc52 backend that regression makes
+  `--version` clear the clipboard it exists to describe. This is a different trap from the
+  `--version` core call, which needs `< /dev/null` because its hazard is blocking, not
+  wiping — do not unify them.
 - **fish does not move to `init`, and that is forced rather than chosen.** fisher's whole
   contract is autoloading `functions/*.fish`; an init form would break that channel.
 - **Never install a keybinding, and never write to a shell config.** A shipped one turns

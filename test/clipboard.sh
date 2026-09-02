@@ -6,6 +6,14 @@
 # reason — the golden suite stays pure.
 set -u
 
+# The subject here is the REAL round-trip through the default chain, and both of
+# these would silently redirect it. The README tells a remote user to export
+# RECITE_BACKEND=osc52; with that set in the tester's own rc, this suite writes
+# an escape sequence at their terminal and then reports FAIL because pbpaste
+# does not hold the payload — a failure of the environment wearing the name of
+# a failure of the code.
+unset RECITE_BACKEND RECITE_TTY
+
 dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 clip=${RECITE_CLIP:-"$dir/../functions/recite-clip"}
 
