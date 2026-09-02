@@ -133,8 +133,23 @@ check "an older recite-clip still reports plainly" "$msg" "recite: copied"
 # capture, so a stub asserting on the bytes goes GREEN against `< /dev/null` —
 # the exact shape of case this repo keeps shipping. The status separates them:
 # measured here, `cat` exits 1 on a closed fd 0 and 0 on /dev/null.
-printf '#!/bin/sh\ncat > /dev/null 2> /dev/null\nprintf "catrc=%%s\\n" "$?" > "%s"\nprintf "osc52 unconfirmed\\n"\n' \
-  "$box/which_rc" > "$box/clip_w"
+#
+# The stub also REFUSES anything that is not exactly `--which`, and that line is
+# half of what this case is worth. Measured: with it ignoring argv, dropping
+# `--which` from the call above left all of these assertions green — including
+# this one, whose name claims to check it. Against the real recite-clip that
+# regression runs the WRITE path from --version, and both backends then do the
+# thing --version must never do. pbcopy is the wipe the closed stdin was chosen
+# to prevent. osc52 is worse than it looks: macOS base64 handed a CLOSED fd 0
+# exits 0 with empty output — measured — so the encode is clean, the emitter has
+# nothing to refuse, and a well-formed OSC 52 with an empty payload clears the
+# terminal's clipboard. --version cannot be allowed to reach that path at all.
+#
+# REINTRODUCE THE BUG: drop `--which` from the `"$clip"` call in recite's
+# --version arm and confirm this line goes red.
+printf '#!/bin/sh\n[ "${1:-}" = --which ] || exit 64\n' > "$box/clip_w"
+printf 'cat > /dev/null 2> /dev/null\nprintf "catrc=%%s\\n" "$?" > "%s"\nprintf "osc52 unconfirmed\\n"\n' \
+  "$box/which_rc" >> "$box/clip_w"
 chmod 755 "$box/clip_w"
 rm -f "$box/which_rc"
 row=$(RECITE_CLIP=$box/clip_w "$recite" --version |

@@ -5,13 +5,15 @@
 # Split from recite-core so the formatter stays a pure filter, golden-testable
 # without touching a clipboard.
 #
-# The backend chain lives HERE and only here. `recite` learns which backend won
-# from the one line this prints on stdout, and owns every user-facing string:
+# The backend chain lives HERE and only here. `recite` learns which
+# backend won from the one line this prints on stdout, and owns every
+# string on the success path:
 #
 #   <backend> confirmed      the backend acknowledged the write
 #   <backend> unconfirmed    the bytes were emitted; nothing acknowledges them
 #
-# Two fields, not prose. Adding a backend is one line here and zero in `recite`.
+# Two fields, not prose. Adding a backend is one `have_` helper and its `case`
+# arms here, and zero in `recite`.
 #
 # This ships the two ends of the chain — pbcopy, then OSC 52. The gap between
 # them (wl-copy, xclip, xsel, clip.exe, each guarded on its own display
@@ -23,10 +25,33 @@
 #   RECITE_BACKEND  auto (default) | pbcopy | osc52 — force one backend
 #   RECITE_TTY      OSC 52 target, default /dev/tty (the test seam)
 #
-# Exit: 0 ok · 2 usage / unknown RECITE_BACKEND · 4 no clipboard backend
+# Exit: 0 ok · 2 usage / unknown RECITE_BACKEND / no temp file · 4 no clipboard
+#       backend, or the OSC 52 encode or write failed · otherwise pbcopy's own
+#       status
 set -u
 
 tty=${RECITE_TTY:-/dev/tty}
+
+# The OSC 52 path stages its encoded payload in a file (see the emitter below).
+# That file is the user's captured output, so it is removed on the way out of
+# every exit there is, and the signal traps are not decoration: recite deletes
+# its own buffers on INT/TERM/HUP for the same reason, and this one would
+# outlive them all without these four lines.
+#
+# Guarded rather than relying on `rm -f ''` being a silent no-op: pbcopy and
+# every refusal path reach the trap without ever staging a file, and there is no
+# reason for those to need an `rm` on PATH at all.
+enc=
+
+cleanup() {
+  if [ -n "$enc" ]; then
+    rm -f "$enc"
+  fi
+}
+trap 'cleanup' EXIT
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 143' TERM
+trap 'cleanup; exit 129' HUP
 
 have_pbcopy() {
   command -v pbcopy > /dev/null 2>&1
@@ -45,8 +70,20 @@ have_pbcopy() {
 #     dash the obvious form kills this script instead of returning false.
 #     Redirections apply left to right, so stderr has to be closed before the
 #     open that fails, or the failure prints.
+#
+# The probe also requires base64 and tr, which is not where a tool check would
+# naturally go. It is here because SELECTION has to be honest on its own: this
+# is the only thing `--which` runs, and under `auto` it is what decides whether
+# osc52 is the answer at all. A probe that skipped the encoders would answer
+# `osc52 unconfirmed` on a box where the encode cannot run.
+#
+# It is no longer the only guard. The emitter below checks base64's own status
+# before a byte reaches the terminal, which is the case this probe cannot see:
+# an encoder that EXISTS, so the probe passes, and then fails.
 have_osc52() {
-  true 2> /dev/null 3>> "$tty"
+  command -v base64 > /dev/null 2>&1 &&
+    command -v tr > /dev/null 2>&1 &&
+    true 2> /dev/null 3>> "$tty"
 }
 
 backend=
@@ -104,6 +141,15 @@ select_backend() {
 if [ "${1:-}" = "--which" ]; then
   # Query mode. No write, and stdin is NEVER read — `recite --version` calls
   # this with stdin closed, so reading it here breaks that caller.
+  #
+  # The arity check is repeated rather than shared with the one below, because
+  # this branch exits before reaching it: without it `--which --junk` answers as
+  # confidently as `--which` does, having silently ignored the half of the
+  # command line it did not understand.
+  if [ "$#" -gt 1 ]; then
+    echo "recite-clip: unknown option: $2" >&2
+    exit 2
+  fi
   select_backend
   printf '%s %s\n' "$backend" "$state"
   exit 0
@@ -129,12 +175,12 @@ case $backend in
     # the clipboard. BEL rather than ST because BEL has the wider terminal
     # support and carries no ESC of its own.
     #
-    # STREAMED. The payload is never held in a shell variable and never appears
-    # in argv: `printf %s "$b64"` would put the user's captured output —
-    # base64-encoded and trivially decodable — into a command line every other
-    # user on the box can read with ps. B-crit's scenario is a shared ssh host,
-    # so that is a real disclosure, and streaming avoids it for free. It also
-    # removes any ARG_MAX ceiling.
+    # NEVER IN ARGV, and never in a shell variable. `printf %s "$b64"` would put
+    # the user's captured output — base64-encoded and trivially decodable — into
+    # a command line every other user on the box can read with ps. A shared ssh
+    # host is this backend's whole scenario, so that is a real disclosure. It
+    # also removes any ARG_MAX ceiling. The staging file below is the same rule
+    # honoured: a private mktemp file, streamed, deleted by the traps at the top.
     #
     # `| tr -d` and never a wrapping flag: GNU base64 wraps at 76 columns and
     # -w0 is GNU-only on older releases. A wrapped payload silently corrupts
@@ -144,17 +190,36 @@ case $backend in
     # outer terminal AND fills a tmux buffer; DCS passthrough needs a config
     # line too and gives only the outer clipboard. Documented, not detected.
     #
-    # `|| exit 4` covers a write that fails AFTER the probe passed — the tty went
-    # away, or the device filled. 4 rather than a new code because the user-visible
-    # situation is the same one: there was no usable sink. It is deliberately
-    # UNTESTED by the suite, which cannot reach it on macOS: it needs a target that
-    # opens and then refuses a write, and there is no /dev/full here. Note that a
-    # partial escape may already have reached the terminal in that case; there is no
-    # way to recall it, and a terminal drops an unterminated OSC string.
+    # TWO STAGES, and the split is the whole point. A single command GROUP exits
+    # with its LAST command's status — a printf of the terminator, which cannot
+    # fail — so a base64 that exists and then fails was invisible: what reached
+    # the terminal was a well-formed OSC 52 carrying an EMPTY payload, which an
+    # xterm-family terminal reads as "set the clipboard to nothing". The
+    # clipboard was wiped and the run reported a send, exit 0. Measured.
+    #
+    # So the encode happens FIRST, into a file, where its status is its own and
+    # nothing has reached the terminal yet. Only a payload that encoded cleanly
+    # is ever emitted.
+    #
+    # The emit is an `&&` chain rather than a plain group, so the chain stops at
+    # the first failure and carries it out: an open that fails (the tty went
+    # away since the probe), a `tr` that exists and fails, a short write. There
+    # is one residue left: a `tr` failure has the prefix already on the wire.
+    # That is deliberate over a second staging file — a second copy of the
+    # user's captured output on disk is the wrong price for it, the probe
+    # already refuses to SELECT osc52 without a `tr`, and a terminal drops an
+    # unterminated OSC string.
+    #
+    # 4 rather than a new code because the user-visible situation is the same
+    # one: there was no usable sink. The short-write arm of that chain stays
+    # UNTESTED by the suite, which cannot reach it on macOS: it needs a target
+    # that opens and then refuses a write, and there is no /dev/full here.
+    enc=$(mktemp "${TMPDIR:-/tmp}/recite-clip.XXXXXX") || exit 2
+    base64 > "$enc" || exit 4
     {
-      printf '\033]52;c;'
-      base64 | tr -d '\n'
-      printf '\007'
+      printf '\033]52;c;' &&
+        tr -d '\n' < "$enc" &&
+        printf '\007'
     } >> "$tty" || exit 4
     ;;
 esac

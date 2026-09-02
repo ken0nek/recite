@@ -12,7 +12,7 @@
 #   RECITE_CORE  path to recite-core, overriding PATH
 #   RECITE_CLIP  path to recite-clip, overriding PATH
 #
-# Exit: 0 copied · 2 usage/no backend/internal · 130 interrupted
+# Exit: 0 copied or sent · 2 usage/no backend/internal · 130 interrupted
 #       otherwise the core's or the clip's own status (3 = input refused)
 #
 # The ORDER of what follows is the whole design, and four steps of it are

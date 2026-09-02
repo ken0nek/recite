@@ -36,9 +36,10 @@ set -l box (mktemp -d)
 mkdir -p $box/onpath $box/fisher $box/lonely $box/plant $box/checkout $box/autoload $box/tmp $box/tmp-refuse $box/slowcore $box/tmp2 $box/hist/fish
 
 # Stand-in clipboard: records what it was handed instead of running pbcopy.
-# `--which` is a no-op that touches nothing, same as the real recite-clip: it is
-# what --version now calls, and this stub predates that contract otherwise.
-printf '#!/bin/sh\ncase $1 in\n  --which) exit 0 ;;\nesac\ncat > "%s"\n' $box/copied >$box/onpath/recite-clip
+# `--which` answers with a report line and touches nothing, same as the real
+# recite-clip: it is what --version now calls, and this stub predates that
+# contract otherwise.
+printf '#!/bin/sh\ncase $1 in\n  --which) printf \'pbcopy confirmed\\\\n\'; exit 0 ;;\nesac\ncat > "%s"\n' $box/copied >$box/onpath/recite-clip
 chmod 755 $box/onpath/recite-clip
 cp $repo/functions/recite-core $box/onpath/recite-core
 
