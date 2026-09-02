@@ -194,9 +194,27 @@ while [ $# -gt 0 ]; do
           '')              core_ver='(no --version)' ;;
         esac
       fi
+      # The clip row carries the BACKEND rather than a version. recite-clip has
+      # no version string of its own on purpose — a third string is a fifth
+      # release pin — and "which machine's clipboard did that go to" is the
+      # failure this row actually has to diagnose.
+      #
+      # Stdin is CLOSED, not /dev/null, and that is not a style choice. A
+      # recite-clip predating --which is `exec pbcopy`, and `pbcopy --which`
+      # handed a readable /dev/null exits 0 and WIPES the clipboard — measured
+      # on macOS. With stdin closed the same binary aborts, its noise goes to
+      # the /dev/null on stderr, and the clipboard survives. --version must
+      # never touch the clipboard, whatever is piped in.
+      clip_ver='-'
+      if [ -n "$clip" ] && [ -x "$clip" ]; then
+        clip_which=$("$clip" --which <&- 2> /dev/null) || clip_which=
+        case $clip_which in
+          *' confirmed'|*' unconfirmed') clip_ver=${clip_which% *} ;;
+        esac
+      fi
       printf '%-12s %-9s %s\n' recite "$version" "$0"
       printf '%-12s %-9s %s\n' recite-core "$core_ver" "${core:-(unresolved)}"
-      printf '%-12s %-9s %s\n' recite-clip - "${clip:-(unresolved)}"
+      printf '%-12s %-9s %s\n' recite-clip "$clip_ver" "${clip:-(unresolved)}"
       exit 0
       ;;
     *)
@@ -255,11 +273,28 @@ if [ "$core_st" -ne 0 ]; then
   exit "$core_st"
 fi
 
-"$clip" < "$out"
+# $(...) is safe HERE specifically, and the "never round-trip the output through
+# a command substitution" rule is not being broken: that rule is about the
+# CAPTURED TEXT, which still flows through `< "$out"` as a stream and is never
+# substituted. What is captured is a two-token status line, where a stripped
+# trailing newline is the wanted behavior.
+clip_info=$("$clip" < "$out")
 clip_st=$?
 
 if [ "$clip_st" -ne 0 ]; then
   exit "$clip_st"
 fi
 
-echo "recite: copied" >&2
+# recite-clip reports a fact; the wording is this file's. `confirmed` means the
+# backend acknowledged the write. `unconfirmed` means bytes went out and nothing
+# answers — OSC 52 is write-only, so claiming "copied" about it would be the
+# plausibly-correct claim this project keeps refusing to make.
+#
+# The catch-all is the SKEW path, not an error path: a recite-clip predating this
+# contract prints nothing, and a half-upgraded install is the live scenario
+# --version exists to diagnose. It degrades to the message that shipped before.
+case $clip_info in
+  *' confirmed')   echo "recite: copied (${clip_info% *})" >&2 ;;
+  *' unconfirmed') echo "recite: sent (${clip_info% *})" >&2 ;;
+  *)               echo "recite: copied" >&2 ;;
+esac

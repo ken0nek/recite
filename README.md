@@ -21,7 +21,9 @@ it. This is text, from any terminal.
 
 ## Status
 
-fish and zsh, on macOS. No bash, no OSC 52, no Linux clipboard, no Windows.
+fish and zsh, on macOS — and over ssh or inside tmux it writes to the terminal's
+own clipboard, so the text lands on the machine you are sitting at. No bash, no
+Linux clipboard tools, no Windows.
 
 ## Use
 
@@ -182,6 +184,7 @@ pipe.
 | `recite init zsh` | Print the zsh widget on stdout, for `eval` in `~/.zshrc` |
 | `RECITE_MAX_LINES` | Line cap, default `1000` |
 | `RECITE_MAX_BYTES` | Byte cap, default `102400` |
+| `RECITE_BACKEND` | `auto` (default), `pbcopy` or `osc52` — force one backend |
 
 Over either cap the block ends with `[Output truncated: N lines omitted]`.
 Truncation is always a suffix — the block never loses lines from the middle.
@@ -204,9 +207,51 @@ export RECITE_MAX_LINES=50    # zsh, and any POSIX shell
 
 `--version` never touches the clipboard, whatever is piped in.
 
+## Over ssh, and inside tmux
+
+With no `pbcopy` to reach — on a remote host, or anywhere the local one is the
+wrong machine — recite writes the block to the **terminal's** clipboard with an
+OSC 52 escape. The text lands on the computer whose keyboard you are typing on,
+not on the host the command ran on.
+
+Nothing acknowledges an OSC 52 write. That is why the message changes:
+
+```console
+$ ls | recite --as 'ls'
+recite: copied (pbcopy)
+$ ssh host 'ls' | recite --as 'ls'
+recite: sent (osc52)
+```
+
+`sent` means the bytes were emitted and no terminal answers for them. `copied`
+means a backend confirmed the write.
+
+**Inside tmux, add one line to `~/.tmux.conf`:**
+
+```tmux
+set -g set-clipboard on
+```
+
+tmux forwards the sequence to the outer terminal *and* keeps a tmux buffer, so
+the text pastes on both sides. tmux only attempts the outer clipboard when that
+terminal's terminfo carries an `Ms` capability; without it the write is a silent
+no-op.
+
+**On a remote host that has its own display**, the chain finds that machine's
+clipboard tool first and the text lands there — on a screen you are not looking
+at. Force the terminal route:
+
+```sh
+export RECITE_BACKEND=osc52
+```
+
+A forced backend never silently falls back. If it is unavailable, recite exits
+`4` and names it, rather than writing somewhere else.
+
 Exit codes: `0` ok · `2` usage · `3` binary input refused · `4` no clipboard
-backend · `129` hung up · `130` interrupted · `143` terminated. On any of the last
-three the unredacted capture is deleted and the clipboard is left as it was.
+backend — no clipboard tool, and no terminal to write the sequence to · `129`
+hung up · `130` interrupted · `143` terminated. On any of the last three the
+unredacted capture is deleted and the clipboard is left as it was.
 
 ## Redaction is on by default
 
@@ -251,6 +296,11 @@ Documented behavior, not bugs.
 - **History pollution.** `↑` recalls the wrapped form. Replay works.
 - **Binary input is refused**, not supported — and a refusal leaves the clipboard
   untouched.
+- **An OSC 52 write cannot be acknowledged.** No terminal replies to one, so
+  recite reports `sent`, not `copied`. If the paste comes up empty, the terminal
+  refused or ignored the sequence and nothing could have said so.
+- **Inside tmux it needs one setting.** `set -g set-clipboard on`, and an outer
+  terminal whose terminfo has `Ms`.
 - Interactive and TUI commands are out of scope under capture.
 
 Out of scope by design: session recording, and images or SVG — the recorders and

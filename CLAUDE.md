@@ -11,7 +11,7 @@ alt-enter          per-shell: rewrites the typed line to end in `| recite --as �
   │                  zsh   the widget `recite init zsh` prints, eval-ed from .zshrc
   └── recite         POSIX sh: resolves both backends, tees, orders the pipeline
         └── recite-core  POSIX sh + one awk pass: stdin -> block on stdout
-              └── recite-clip  POSIX sh: stdin -> clipboard
+              └── recite-clip  POSIX sh: stdin -> clipboard, or OSC 52 to the terminal
 ```
 
 Two splits, and both are load-bearing.
@@ -73,6 +73,14 @@ comment in fish; both shells are right and no port can close it.
 their own functions in, so the cases pin what it must NOT take — a dangling link that is
 not ours, a real file, a live link. Sandboxed through `RECITE_BINDIR` and `RECITE_FISHDIR`,
 so it never touches a real config.
+
+`clip-tests.sh` is `recite-clip`'s own suite, hermetic through `RECITE_TTY` (the OSC 52
+target) and `RECITE_BACKEND` (selection). The real clipboard is never touched. Two of its
+cases have teeth and both must be confirmed by reintroducing the bug: the **no-newline**
+case, which goes green against a wrapped payload if `| tr -d` is deleted and nothing else
+notices; and the **unopenable target** case, which must not use a nonexistent path in a
+writable directory — append mode *creates* that, and the case would pass against a broken
+probe.
 
 Do not write the assertion counts into this file. They were wrong here once already.
 
@@ -158,6 +166,26 @@ reuse these goldens as its acceptance criteria.
   zsh` would otherwise have to find a sibling from `$0`, which is a symlink in
   `~/.local/bin` — and `readlink -f` is not reliably present on the older macOS this
   supports. `<<'ZSH'` also keeps the apostrophe rule above out of scope.
+- **The backend chain lives in `recite-clip`, and `recite` learns the backend only from its
+  one line of stdout** — `<backend> <confirmed|unconfirmed>`. `recite` owns every
+  user-facing string, so a new backend is one line in `recite-clip` and zero in `recite`.
+  An empty or unparseable line is the SKEW path, not an error: it degrades to the bare
+  `recite: copied` that shipped before.
+- **That `$(…)` around the clip call captures a status LINE, not the output.** The
+  no-command-substitution rule is about the captured text — which still reaches the sink as
+  a stream through `< "$out"` — and it still holds for it. Here a stripped trailing newline
+  is the wanted behavior.
+- **Test tty openability with `true 2> /dev/null 3>> "$tty"`.** All three parts are
+  load-bearing. `[ -w ]` is `access(2)` and returns true with no controlling tty, where the
+  open then fails. `: > "$tty"` truncates — harmless against a real `/dev/tty`, destructive
+  against a `RECITE_TTY` test file. And `:` is a special builtin, so a redirection error on
+  it kills a non-interactive `dash` outright; `true` returns false instead. Redirections
+  apply left to right, so `2>` has to come first or the failure prints.
+- **`recite-clip --which` is called with stdin CLOSED (`<&-`), never `< /dev/null`.** A
+  `recite-clip` predating `--which` is `exec pbcopy`, and `pbcopy --which` handed a readable
+  `/dev/null` exits 0 and **wipes the clipboard**. With stdin closed it aborts instead and
+  the clipboard survives. This is a different trap from the `--version` core call, which
+  needs `< /dev/null` because its hazard is blocking, not wiping — do not unify them.
 - **fish does not move to `init`, and that is forced rather than chosen.** fisher's whole
   contract is autoloading `functions/*.fish`; an init form would break that channel.
 - **Never install a keybinding, and never write to a shell config.** A shipped one turns

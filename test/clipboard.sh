@@ -17,7 +17,9 @@ fi
 saved=$(pbpaste 2>/dev/null) || saved=
 payload='recite-clip round-trip 12345'
 
-printf '%s' "$payload" | "$clip"
+# recite-clip reports its backend on stdout now. This suite's subject is the real
+# round-trip, not the report — clip-tests.sh pins the line's shape.
+printf '%s' "$payload" | "$clip" > /dev/null
 rc=$?
 
 got=$(pbpaste 2>/dev/null) || got=

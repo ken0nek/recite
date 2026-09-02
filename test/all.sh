@@ -6,6 +6,7 @@
 #   fish-tests.fish   the fish shim and its widget  (sandboxed, needs fish)
 #   zsh-tests.zsh     the zsh widget                (sandboxed, needs zsh)
 #   install-links.sh  install.sh's link contract    (sandboxed, needs fish)
+#   clip-tests.sh     recite-clip's backends        (sandboxed, no clipboard)
 #   clipboard.sh      recite-clip round-trip        (CLOBBERS the clipboard)
 #   binding.sh        the alt-enter binding         (drives a real pty)
 #   cross-shell.sh    fish and zsh copy the same    (drives a real pty)
@@ -45,6 +46,10 @@ fi
 echo
 echo "== install.sh links =="
 "$dir/install-links.sh" || status=1
+
+echo
+echo "== recite-clip backends =="
+"$dir/clip-tests.sh" || status=1
 
 echo
 echo "== recite-clip round-trip =="

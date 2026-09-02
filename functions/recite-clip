@@ -1,18 +1,162 @@
 #!/bin/sh
-# recite-clip — write stdin to the system clipboard.
+# recite-clip — write stdin to the system clipboard, or to the terminal's own
+# clipboard over OSC 52.
 #
 # Split from recite-core so the formatter stays a pure filter, golden-testable
 # without touching a clipboard.
 #
-# M0 is macOS only. A later milestone adds the fallback chain (wl-copy, xclip,
-# xsel, clip.exe, OSC 52); this is the seam it plugs into.
+# The backend chain lives HERE and only here. `recite` learns which backend won
+# from the one line this prints on stdout, and owns every user-facing string:
 #
-# Exit: 0 ok · 4 no clipboard backend available
+#   <backend> confirmed      the backend acknowledged the write
+#   <backend> unconfirmed    the bytes were emitted; nothing acknowledges them
+#
+# Two fields, not prose. Adding a backend is one line here and zero in `recite`.
+#
+# This ships the two ends of the chain — pbcopy, then OSC 52. The gap between
+# them (wl-copy, xclip, xsel, clip.exe, each guarded on its own display
+# variable) is a later milestone's work; the order is what leaves room for it.
+#
+# Usage: recite-clip [--which]
+#
+# Environment:
+#   RECITE_BACKEND  auto (default) | pbcopy | osc52 — force one backend
+#   RECITE_TTY      OSC 52 target, default /dev/tty (the test seam)
+#
+# Exit: 0 ok · 2 usage / unknown RECITE_BACKEND · 4 no clipboard backend
 set -u
 
-if command -v pbcopy > /dev/null 2>&1; then
-  exec pbcopy
+tty=${RECITE_TTY:-/dev/tty}
+
+have_pbcopy() {
+  command -v pbcopy > /dev/null 2>&1
+}
+
+# Availability of OSC 52 is "can this process open the terminal for writing",
+# and all three parts of this one line are load-bearing:
+#
+#   - APPEND, because `: > "$tty"` truncates. Harmless against a real /dev/tty,
+#     destructive against a RECITE_TTY test file — which is the shape of bug
+#     that makes a case pass against broken code.
+#   - an OPEN rather than `[ -w "$tty" ]`. `-w` is access(2) and returns true
+#     with no controlling tty, where the open then fails.
+#   - `true`, not `:`, and `2> /dev/null` FIRST. `:` is a POSIX special builtin
+#     and a redirection error on one is fatal to a non-interactive shell: under
+#     dash the obvious form kills this script instead of returning false.
+#     Redirections apply left to right, so stderr has to be closed before the
+#     open that fails, or the failure prints.
+have_osc52() {
+  true 2> /dev/null 3>> "$tty"
+}
+
+backend=
+state=
+
+select_backend() {
+  case ${RECITE_BACKEND:-auto} in
+    auto)
+      if have_pbcopy; then
+        backend=pbcopy
+        state=confirmed
+      elif have_osc52; then
+        backend=osc52
+        state=unconfirmed
+      fi
+      ;;
+    pbcopy)
+      if have_pbcopy; then
+        backend=pbcopy
+        state=confirmed
+      fi
+      ;;
+    osc52)
+      if have_osc52; then
+        backend=osc52
+        state=unconfirmed
+      fi
+      ;;
+    *)
+      echo "recite-clip: unknown RECITE_BACKEND: ${RECITE_BACKEND:-}" >&2
+      echo "     known: auto, pbcopy, osc52" >&2
+      exit 2
+      ;;
+  esac
+
+  if [ -n "$backend" ]; then
+    return 0
+  fi
+
+  # A FORCED backend that is unavailable exits rather than falling through to
+  # the next one. The variable exists to stop text landing on a clipboard you
+  # are not sitting at, and a silent fallback is that same bug wearing the
+  # fix's name.
+  case ${RECITE_BACKEND:-auto} in
+    auto)
+      echo "recite-clip: no clipboard backend found (no pbcopy, and no terminal for OSC 52)" >&2
+      ;;
+    *)
+      echo "recite-clip: backend ${RECITE_BACKEND} is not available here" >&2
+      ;;
+  esac
+  exit 4
+}
+
+if [ "${1:-}" = "--which" ]; then
+  # Query mode. No write, and stdin is NEVER read — `recite --version` calls
+  # this with stdin closed, so reading it here breaks that caller.
+  select_backend
+  printf '%s %s\n' "$backend" "$state"
+  exit 0
 fi
 
-echo "recite-clip: no clipboard backend found (this build supports pbcopy only)" >&2
-exit 4
+if [ "$#" -gt 0 ]; then
+  echo "recite-clip: unknown option: $1" >&2
+  exit 2
+fi
+
+select_backend
+
+case $backend in
+  pbcopy)
+    # Not `exec`: the report line is printed after the write, so this process
+    # has to outlive it.
+    pbcopy || exit $?
+    ;;
+  osc52)
+    # ESC ] 5 2 ; c ; <base64, no newlines> BEL
+    #
+    # `c` is the clipboard selection, not `p` (primary) — "paste into Slack" is
+    # the clipboard. BEL rather than ST because BEL has the wider terminal
+    # support and carries no ESC of its own.
+    #
+    # STREAMED. The payload is never held in a shell variable and never appears
+    # in argv: `printf %s "$b64"` would put the user's captured output —
+    # base64-encoded and trivially decodable — into a command line every other
+    # user on the box can read with ps. B-crit's scenario is a shared ssh host,
+    # so that is a real disclosure, and streaming avoids it for free. It also
+    # removes any ARG_MAX ceiling.
+    #
+    # `| tr -d` and never a wrapping flag: GNU base64 wraps at 76 columns and
+    # -w0 is GNU-only on older releases. A wrapped payload silently corrupts
+    # the sequence.
+    #
+    # No $TMUX branch. tmux's own `set -g set-clipboard on` forwards this to the
+    # outer terminal AND fills a tmux buffer; DCS passthrough needs a config
+    # line too and gives only the outer clipboard. Documented, not detected.
+    #
+    # `|| exit 4` covers a write that fails AFTER the probe passed — the tty went
+    # away, or the device filled. 4 rather than a new code because the user-visible
+    # situation is the same one: there was no usable sink. It is deliberately
+    # UNTESTED by the suite, which cannot reach it on macOS: it needs a target that
+    # opens and then refuses a write, and there is no /dev/full here. Note that a
+    # partial escape may already have reached the terminal in that case; there is no
+    # way to recall it, and a terminal drops an unterminated OSC string.
+    {
+      printf '\033]52;c;'
+      base64 | tr -d '\n'
+      printf '\007'
+    } >> "$tty" || exit 4
+    ;;
+esac
+
+printf '%s %s\n' "$backend" "$state"
