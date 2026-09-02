@@ -100,6 +100,48 @@ check "init fish says what to do instead" \
 "$recite" --nonesuch < /dev/null > /dev/null 2>&1
 check "an unknown option exits 2" "$?" 2
 
+# --------------------------------------------------------- the clip report ----
+#
+# recite-clip prints one line on stdout — `<backend> <confirmed|unconfirmed>` —
+# and `recite` owns the wording. OSC 52 is write-only: no terminal replies, so
+# "copied" about it would be a plausibly-correct claim with nothing behind it,
+# which is the one thing this tool refuses to produce. The verb carries the
+# caveat; the shape absorbs every backend a later milestone adds.
+printf '#!/bin/sh\ncat > /dev/null\nprintf "pbcopy confirmed\\n"\n' > "$box/clip_pb"
+printf '#!/bin/sh\ncat > /dev/null\nprintf "osc52 unconfirmed\\n"\n' > "$box/clip_osc"
+chmod 755 "$box/clip_pb" "$box/clip_osc"
+
+msg=$(printf 'x\n' | RECITE_CLIP=$box/clip_pb "$recite" --as x 2>&1 > /dev/null)
+check "a confirmed backend is copied, and named" "$msg" "recite: copied (pbcopy)"
+
+msg=$(printf 'x\n' | RECITE_CLIP=$box/clip_osc "$recite" --as x 2>&1 > /dev/null)
+check "an unconfirmed backend is SENT, not copied" "$msg" "recite: sent (osc52)"
+
+# A recite-clip predating B-crit prints nothing at all. Mixed-channel installs
+# are live here — a fisher copy shadows a Homebrew one on $fish_function_path —
+# so this is the case that proves an old sink does not produce a broken message.
+msg=$(printf 'x\n' | RECITE_CLIP=$box/clip "$recite" --as x 2>&1 > /dev/null)
+check "an older recite-clip still reports plainly" "$msg" "recite: copied"
+
+# --version's clip row carries the backend, and the --which call must reach it
+# with stdin CLOSED. An older recite-clip is `exec pbcopy`, and `pbcopy --which`
+# handed a readable /dev/null exits 0 and WIPES the clipboard — measured. With
+# stdin closed the same binary aborts and the clipboard survives.
+#
+# The stub records `cat`s EXIT STATUS, not what it read, and that is the whole
+# design of this case. A closed fd 0 and /dev/null both produce an EMPTY
+# capture, so a stub asserting on the bytes goes GREEN against `< /dev/null` —
+# the exact shape of case this repo keeps shipping. The status separates them:
+# measured here, `cat` exits 1 on a closed fd 0 and 0 on /dev/null.
+printf '#!/bin/sh\ncat > /dev/null 2> /dev/null\nprintf "catrc=%%s\\n" "$?" > "%s"\nprintf "osc52 unconfirmed\\n"\n' \
+  "$box/which_rc" > "$box/clip_w"
+chmod 755 "$box/clip_w"
+rm -f "$box/which_rc"
+row=$(RECITE_CLIP=$box/clip_w "$recite" --version |
+  awk '$1 == "recite-clip" { print $2 }')
+check "--version names the backend, and hands --which a closed stdin" \
+  "$row/$(cat "$box/which_rc" 2> /dev/null)" "osc52/catrc=1"
+
 # ------------------------------------------------------- printing is first ----
 #
 # The guard sits BELOW the tee, and this is the reason: above it, an unresolved
