@@ -39,19 +39,32 @@ jobs:
         run: test/all.sh
 
   linux:
-    name: Linux — goldens only (informational)
+    name: Linux — goldens (${{ matrix.awk }}, informational)
     runs-on: ubuntu-latest
     # Informational on purpose: cross-platform byte-identity is a goal this
     # project has not committed to yet, so it must never gate the build.
     # This is that gate early and for free — the goldens are byte-compared with
-    # `cmp`, so a Linux awk that diverges from macOS BWK shows up immediately.
+    # `cmp`, so an awk that diverges from macOS BWK shows up immediately.
     #
-    # To make it the real gate, drop continue-on-error and matrix over BWK /
-    # gawk / mawk. It runs under whatever /usr/bin/awk the runner ships (mawk),
-    # which is one variant, not three.
+    # To make it the real gate, drop continue-on-error. Do that after three
+    # green runs, not before: a red advisory job that is never acted on is
+    # worse than no job, because it trains the badge to be ignored.
     continue-on-error: true
+    strategy:
+      # fail-fast would cancel the other two the moment one diverges, and which
+      # awks agree is the entire finding.
+      fail-fast: false
+      matrix:
+        # Debian ships BWK as `original-awk`. These are the three variants
+        # byte-identity rests on; the runner's own /usr/bin/awk is mawk.
+        awk: [original-awk, gawk, mawk]
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install ${{ matrix.awk }}
+        run: sudo apt-get install -y ${{ matrix.awk }}
+
+      # The package name is the binary name for all three, so this doubles as
+      # the check that the install put it on PATH.
       - name: Goldens
-        run: test/run.sh
+        run: RECITE_AWK=${{ matrix.awk }} test/run.sh

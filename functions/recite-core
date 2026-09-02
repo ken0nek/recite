@@ -20,6 +20,8 @@ version=0.3.0
 
 as=
 redact=1
+# Swappable so the goldens can run this core under BWK, gawk and mawk in turn.
+awkbin=${RECITE_AWK:-awk}
 max_lines=${RECITE_MAX_LINES:-1000}
 max_bytes=${RECITE_MAX_BYTES:-102400}
 
@@ -80,7 +82,7 @@ fi
 # LC_ALL=C makes length() count bytes (so RECITE_MAX_BYTES means what it says)
 # and matching deterministic, which is what the byte-identity goldens rest on.
 # UTF-8 still passes through as bytes.
-RECITE_AS="$as" LC_ALL=C awk \
+RECITE_AS="$as" LC_ALL=C "$awkbin" \
   -v redact="$redact" \
   -v maxl="$max_lines" \
   -v maxb="$max_bytes" '
