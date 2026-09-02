@@ -56,6 +56,9 @@ Three channels. **Each is a complete install. You need only one.**
 brew install ken0nek/tap/recite
 ```
 
+Homebrew 6 refuses a third-party tap until you trust it, and says so. If it
+does, `brew trust ken0nek/tap` and run the install again.
+
 ```fish
 fisher install ken0nek/recite
 ```
