@@ -142,7 +142,8 @@ part of the core's contract precisely so a reimplementation cannot pass the suit
 still break `recite --version`.
 
 `RECITE_CORE` and `RECITE_CLIP` point the suites at a different binary, so a Go core can
-reuse these goldens as its acceptance criteria.
+reuse these goldens as its acceptance criteria. `RECITE_AWK` swaps the core's interpreter,
+which is what makes the BWK/gawk/mawk comparison runnable at all.
 
 ## Rules
 
